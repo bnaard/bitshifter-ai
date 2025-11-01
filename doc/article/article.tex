@@ -1,0 +1,56 @@
+\documentclass[twocolumn]{article}
+% Graphics with TikZ
+\usepackage{tikz}
+
+\input{sections/title.tex}
+% Hint: \title{what ever}, \author{who care} and \date{when ever} could stand 
+% before or after the \begin{document} command 
+% BUT the \maketitle command MUST come AFTER the \begin{document} command! 
+\begin{document}
+
+\maketitle
+
+\input{sections/abstract.tex}
+
+\input{sections/introduction.tex}
+
+
+\section{Related Work}\label{sec:related}
+% TODO: Summarise prior art and position the contribution relative to existing architectures and methods.
+
+\section{Background and Preliminaries}\label{sec:background}
+% TODO: Define notation, basic concepts, and any baseline models needed for understanding.
+
+\input{sections/proposed_method.tex}
+
+\section{Implementation Details}\label{sec:implementation}
+% TODO: Provide architecture specifics, training regimen, datasets, reproducibility notes and environment.
+
+\section{Experimental Setup}\label{sec:experiments}
+% TODO: Describe tasks/benchmarks, baselines, ablations and evaluation metrics.
+
+\section{Results}\label{sec:results}
+% TODO: Add quantitative tables, statistical analysis and efficiency measurements.
+
+\section{Qualitative Analysis}\label{sec:qualitative}
+% TODO: Include visualisations, failure cases and interpretability insights.
+
+\section{Discussion}\label{sec:discussion}
+% TODO: Analyse why the method works, its limitations and applicability.
+
+\section{Conclusions}\label{conclusions}
+There is no longer \LaTeX{} example which was written by \cite{doe}.
+
+\section*{Acknowledgements}\label{sec:ack}
+% TODO: Acknowledge funding, contributors, and dataset licenses.
+
+\appendix
+\section{Appendix: Additional Details}\label{sec:appendix}
+% TODO: Extended hyperparameters, proofs, and extra experiments.
+
+\begin{thebibliography}{9}
+\bibitem[Doe]{doe} \emph{First and last \LaTeX{} example.},
+John Doe 50 B.C. 
+\end{thebibliography}
+
+\end{document}

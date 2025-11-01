@@ -1,0 +1,27 @@
+\section{Proposed Method}\label{sec:method}
+% TODO: Present the new neuronal-network concept, intuition, formal definition and key equations.
+\begin{center}
+\begin{tikzpicture}[scale=0.45,transform shape, box/.style={draw, minimum size=8mm, inner sep=1pt}, node distance=0.9cm]
+	% sequence can be changed; this is a small "random" example
+	\foreach \i [count=\xi from 0] in {1,0,1,1,0,0,1,0} {
+		\node[box] (n\xi) at (\xi*0.95,0) {\i};
+	}
+
+    % labels above leftmost and rightmost boxes
+    \node[above=2pt] at (n0.north) {MSB};
+    \node[above=2pt] at (n7.north) {LSB};
+
+	% second row (random 0/1 sequence)
+	\foreach \i [count=\xi from 0] in {0,1,0,0,1,1,0,1} {
+		\node[box] (m\xi) at (\xi*0.95,-1.2) {\i};
+	}
+
+	% centered triple dot between rows
+	\node at (3.325,-2.1) {$\ldots$};
+
+	% third row (another random 0/1 sequence)
+	\foreach \i [count=\xi from 0] in {1,1,0,0,1,0,1,0} {
+		\node[box] (p\xi) at (\xi*0.95,-3.0) {\i};
+	}
+\end{tikzpicture}
+\end{center}

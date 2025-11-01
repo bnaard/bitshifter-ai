@@ -1,0 +1,76 @@
+# LaTeX intermediate and build files
+# See: https://github.com/github/gitignore/blob/main/TeX.gitignore
+*.aux
+*.bbl
+*.blg
+*.brf
+*.cb
+*.cb2
+*.idx
+*.ind
+*.ilg
+*.inx
+*.lof
+*.log
+*.lot
+*.out
+*.toc
+*.fmt
+*.fot
+*.glo
+*.gls
+*.ist
+*.acn
+*.acr
+*.alg
+*.glg
+*.glsdefs
+*.fdb_latexmk
+*.fls
+*.run.xml
+*.synctex.gz
+*.synctex(busy)
+*.nav
+*.snm
+*.vrb
+*.dvi
+*.xdv
+
+# LaTeXmk / other build dirs
+_minted-*/
+_minted*
+build/
+out/
+latex.output/
+
+# Generated PDFs (optional — uncomment if you don't track PDFs)
+# *.pdf
+
+# Temporary editor files
+*~
+# swap files
+*.swp
+# Emacs files
+.#*
+
+# macOS / Finder
+# macOS metadata files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Icon
+ files (created by Finder)
+Icon
+
+# Thumbnails and Finder temporary files
+.fseventsd/
+.Spotlight-V100/
+.TemporaryItems/
+.Trashes/
+.VolumeIcon.icns
+
+# Resource fork files
+._*
+
+
