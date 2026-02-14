@@ -1,31 +1,19 @@
-# bitshifter
+# Bitwise AI: MNIST Proof-of-Concept
 
-Minimal repository for the Bitshifter paper and supporting sources (LaTeX, figures, and auxiliary materials).
+This project explores **bit-operation-based neuronal models** for MNIST digit recognition, aiming to replace traditional multiply-accumulate (MAC) operations with bitwise logic (shift, AND, OR, XOR, NOT) for efficient CPU execution.
 
-## Quick start — build the paper locally
-Prerequisites: a working LaTeX installation (TeX Live / MacTeX) and `latexmk`.
+## 📌 Project Context
+- **Vision & Mission:** [/context/vision_mission.md](context/vision_mission.md)
+- **Roadmap:** [/context/roadmap.md](context/roadmap.md)
+- **Decisions:** [/context/decisions.log](context/decisions.log)
 
-From the repository root:
+## 📂 Structure
+- `/context/`: Project documentation (vision, roadmap, decisions).
+- `/research/`: Literature review and papers.
+- `/doc/papers/`: LaTeX research results and whitepaper.
 
-```bash
-cd /workspaces/bitshifter
-cd doc/article
-latexmk -pdf article.tex
-```
+## 🚀 Next Steps
+- Researching state-of-the-art bit-operation models.
+- Implementing a Python prototype for MNIST.
 
-This produces `article.pdf` (or similarly named PDF) in `doc/article/`.
-
-## Continuous integration
-A minimal GitHub Actions workflow is configured at `.github/workflows/latex.yml`. It runs on pushes and pull requests to `main`, compiles `doc/article/article.tex`, and uploads any generated PDF(s) as build artifacts so reviewers can download the compiled paper.
-
-## Contributing
-See `CONTRIBUTING.md` for branching rules, PR checklist, and how to run the build locally. Open pull requests against `main` and include a short description of changes and a link to any related issue.
-
-## Files of interest
-- `doc/article/article.tex` — main LaTeX source (build root)
-- `doc/article/sections/` — section source files
-- `.github/workflows/latex.yml` — CI build for LaTeX
-- `CONTRIBUTING.md` — contribution guidelines and PR checklist
-
-## License
-See `LICENSE` if present. If there is no `LICENSE` file, please ask the maintainers before reusing code or figures.
+*(For details, see [Project Plan](context/project_plan.md) and [Risk Assessment](context/risk_assessment.md).)*
