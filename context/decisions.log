@@ -1,0 +1,8 @@
+# Decision Log
+
+## 2026-02-14
+- Repository restructured to include `/doc/context/` for project documentation.
+- LaTeX-based scientific paper approach confirmed for research results.
+- MNIST dataset selected for proof-of-concept.
+- Python (Jupyter) and Rust chosen for implementation stages.
+- Baseline comparison with MAC-based MNIST model approved.
