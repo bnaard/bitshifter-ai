@@ -23,6 +23,20 @@ Suggested PR checklist (authors should complete before requesting review):
 - [ ] Tests (if any) pass locally.
 - [ ] At least one reviewer is requested.
 
+## Commit message convention
+Please use short, descriptive commit messages. We recommend the minimal prefix style:
+
+Format: `type: short description`
+
+Common types: `feat`, `fix`, `doc`, `chore`, `refactor`, `test`.
+
+Examples:
+- `doc: add initial proposed method description`
+- `feat: add encoding layer`
+- `fix: correct eq. (3) in section 2`
+
+Keep messages concise and include a scope when helpful (e.g., `doc(proposed_method): initial draft`).
+
 ## Building the paper locally
 We use standard TeX toolchain (latexmk/TeX Live). To build the main paper from the repository root:
 

@@ -11,13 +11,25 @@
     }
 
     % labels above leftmost and rightmost boxes
-    \node[above=2pt] at (n0.north) {MSB};
-    \node[above=2pt] at (n7.north) {LSB};
+    \node[above=2pt] at (n0.north) {LSB};
+    \node[above=2pt] at (n7.north) {MSB};
+
+    % add an extra box after a horizontal gap equal to 3 box widths
+    % compute a random 0/1 for the extra box on the first row
+    \pgfmathtruncatemacro{\rnda}{random(0,1)}
+    \node[box] (nextra) at (11*0.95,0) {\rnda};
 
     % second row (random 0/1 sequence)
     \foreach \i [count=\xi from 0] in {0,1,0,0,1,1,0,1} {
         \node[box] (m\xi) at (\xi*0.95,-1.2) {\i};
     }
+    % extra box after a gap of 3 boxes on the second row
+    \pgfmathtruncatemacro{\rndb}{random(0,1)}
+    \node[box] (mextra) at (11*0.95,-1.2) {\rndb};
+
+    % three small dots between the last box (m7) and the extra rightmost box on the second row
+    \node at (8.5,-1.2) {$\ldots$};
+    \node at (8.5,-2.1) {$\ldots$};
 
     % centered triple dot between rows
     \node at (3.325,-2.1) {$\ldots$};
@@ -26,5 +38,37 @@
     \foreach \i [count=\xi from 0] in {1,1,0,0,1,0,1,0} {
         \node[box] (p\xi) at (\xi*0.95,-3.0) {\i};
     }
+    % extra box after a gap of 3 boxes on the third row
+    \pgfmathtruncatemacro{\rndc}{random(0,1)}
+    \node[box] (pextra) at (11*0.95,-3.0) {\rndc};
+
+    % right-side vertical column (single column), placed relative to the extra box so it's visible
+    \coordinate (colx) at ($(nextra.east)+(1.5,0)$);
+    \pgfmathtruncatemacro{\colA}{random(0,1)}
+    \node[box] (col1) at ($(colx)+(0,0)$) {\colA};
+    \pgfmathtruncatemacro{\colB}{random(0,1)}
+    \node[box] (col2) at ($(colx)+(0,-1.2)$) {\colB};
+    % vertical dots indicating omitted rows
+    \node at ($(colx)+(0,-2.1)$) {$\vdots$};
+    \pgfmathtruncatemacro{\colC}{random(0,1)}
+    \node[box] (col3) at ($(colx)+(0,-3.0)$) {\colC};
+    % small vertical gap then more omitted rows
+    \node at ($(colx)+(0,-4.2)$) {$\vdots$};
+    \pgfmathtruncatemacro{\colD}{random(0,1)}
+    \node[box] (col4) at ($(colx)+(0,-5.4)$) {\colD};
+    \pgfmathtruncatemacro{\colE}{random(0,1)}
+    \node[box] (col5) at ($(colx)+(0,-6.6)$) {\colE};
+    \node at ($(colx)+(0,-7.5)$) {$\vdots$};
+    \pgfmathtruncatemacro{\colF}{random(0,1)}
+    \node[box] (col6) at ($(colx)+(0,-8.7)$) {\colF};
+
+    % arrows from the first-row rightmost box (n7) to each of the extra rightmost boxes
+    \draw[->,thick,>=latex] (n7.east) -- (nextra.west);
+    \draw[->,thick,>=latex] (n7.east) -- (mextra.west);
+    \draw[->,thick,>=latex] (n7.east) -- (pextra.west);
+    % arrows from the second-row rightmost box (m7) to each of the extra rightmost boxes
+    \draw[->,thick,>=latex] (p7.east) -- (nextra.west);
+    \draw[->,thick,>=latex] (p7.east) -- (mextra.west);
+    \draw[->,thick,>=latex] (p7.east) -- (pextra.west);
 \end{tikzpicture}
 \end{center}

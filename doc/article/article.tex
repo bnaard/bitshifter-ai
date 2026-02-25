@@ -1,6 +1,8 @@
 \documentclass[twocolumn]{article}
 % Graphics with TikZ
 \usepackage{tikz}
+% Enable TikZ libraries used by figures (coordinate calc for positioned nodes, arrows.meta for arrowheads)
+\usetikzlibrary{calc,arrows.meta}
 
 \input{sections/title.tex}
 % Hint: \title{what ever}, \author{who care} and \date{when ever} could stand 
@@ -18,8 +20,7 @@
 \section{Related Work}\label{sec:related}
 % TODO: Summarise prior art and position the contribution relative to existing architectures and methods.
 
-\section{Background and Preliminaries}\label{sec:background}
-% TODO: Define notation, basic concepts, and any baseline models needed for understanding.
+\input{sections/background_preliminaries.tex}
 
 \input{sections/proposed_method.tex}
 
