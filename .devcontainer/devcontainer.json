@@ -1,16 +1,52 @@
 {
-    "name": "latex-env",
+    "name": "bitshifter-ai",
+    "dockerComposeFile": "docker-compose.yml",
+    "service": "dev",
+    "workspaceFolder": "/workspace",
     "customizations": {
         "vscode": {
             "extensions": [
-                "james-yu.latex-workshop"
+                "james-yu.latex-workshop",
+                "mblode.zotero"
             ],
             "settings": {
+                // Start zellij automatically when a new VS Code terminal is opened
+                "terminal.integrated.defaultProfile.linux": "bash",
+                "terminal.integrated.profiles.linux": {
+                    "bash": {
+                        "path": "/bin/bash"
+                    },
+                    "claude": {
+                        "path": "/root/.local/bin/claude"
+                    },
+                },
                 "latex-workshop.latex.outDir": "./out",
                 "latex-workshop.synctex.afterBuild.enabled": true,
                 "latex-workshop.view.pdf.viewer": "tab",
+                "latex-workshop.latex.tools": [
+                    {
+                        "name": "lualatex",
+                        "command": "lualatex",
+                        "args": ["-synctex=1", "-interaction=nonstopmode", "-output-directory=%OUTDIR%", "%DOC%"]
+                    },
+                    {
+                        "name": "latexmk",
+                        "command": "latexmk",
+                        "args": ["-lualatex", "-synctex=1", "-interaction=nonstopmode", "-file-line-error", "-pdf", "-outdir=%OUTDIR%", "%DOC%"]
+                    }
+                ],
+                "latex-workshop.latex.recipes": [
+                    {
+                        "name": "lualatex",
+                        "tools": ["lualatex"]
+                    },
+                    {
+                        "name": "latexmk (LuaLaTeX)",
+                        "tools": ["latexmk"]
+                    }
+                ],
             }
+
         }
     },
-    "dockerFile": "Dockerfile"
 }

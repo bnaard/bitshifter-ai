@@ -1,76 +1,101 @@
-# LaTeX intermediate and build files
-# See: https://github.com/github/gitignore/blob/main/TeX.gitignore
+# =============================================================================
+# Project specific
+# =============================================================================
+tmp/
+out/
+.root/
+.env
+
+
+# =============================================================================
+# LaTeX build artifacts
+# =============================================================================
 *.aux
 *.bbl
 *.blg
 *.brf
-*.cb
-*.cb2
-*.idx
-*.ind
-*.ilg
-*.inx
-*.lof
 *.log
-*.lot
 *.out
 *.toc
-*.fmt
-*.fot
+*.lof
+*.lot
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.nav
+*.snm
+*.vrb
 *.glo
 *.gls
+*.idx
+*.ilg
+*.ind
 *.ist
+*.maf
+*.mtc*
+*.xdv
 *.acn
 *.acr
 *.alg
 *.glg
 *.glsdefs
-*.fdb_latexmk
-*.fls
 *.run.xml
-*.synctex.gz
-*.synctex(busy)
-*.nav
-*.snm
-*.vrb
+*.bcf
+*.thm
+*.tdo
+*.pygtex
+*.pygstyle
+*.listing
+*tcbtemp
+
+# PDFs and other generated documents
+*.pdf
+*.ps
 *.dvi
-*.xdv
 
-# LaTeXmk / other build dirs
-_minted-*/
-_minted*
+# minted package output
+_minted-*
+*.minted
+
+# latexmk
+latexmkrc
+
+# Build folders
 build/
-out/
-latex.output/
+_build/
+output/
 
-# Generated PDFs (optional — uncomment if you don't track PDFs)
-# *.pdf
+# Claude Code local settings (personal, not shared)
+.claude/settings.local.json
 
-# Temporary editor files
-*~
-# swap files
+# Editor/project files
+.idea/
 *.swp
-# Emacs files
-.#*
-
-# macOS / Finder
-# macOS metadata files
+*~
 .DS_Store
 .AppleDouble
 .LSOverride
 
-# Icon
- files (created by Finder)
+# Icon must end with two \r
 Icon
 
-# Thumbnails and Finder temporary files
-.fseventsd/
-.Spotlight-V100/
-.TemporaryItems/
-.Trashes/
-.VolumeIcon.icns
+svg-inkscape/
+cheatsheet/svg-inkscape/
 
-# Resource fork files
+# Thumbnails
 ._*
 
 
+# =============================================================================
+# OS Generated Files
+# =============================================================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+.DocumentRevisions-V100
+.fseventsd
