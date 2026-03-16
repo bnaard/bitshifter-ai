@@ -1,61 +1,48 @@
 # Contributing
 
-Thanks for helping improve this project. This is a short guide to our workflow and expectations so contributions stay small and reviewable.
+Short guide to the project workflow.
 
-## Branching and naming
-- Keep `main` protected and always production-ready.
-- Create short-lived branches for work, using one of these prefixes:
-  - `feature/<short-desc>` or `feat/<short-desc>` for new features
-  - `fix/<short-desc>` for bug fixes
-  - `doc/<short-desc>` for documentation or paper edits
-  - `hotfix/<short-desc>` for urgent fixes to `main`
+## Branching
 
-## Pull requests (PRs)
-- Open PRs against `main`.
-- Keep PRs small and focused — one logical change per PR.
-- Include a clear title, description, and list any files that must be reviewed (figures, equations, results).
+- `main` is protected and always buildable.
+- Use short-lived branches with prefixes: `feat/`, `fix/`, `doc/`, `chore/`, `hotfix/`.
 
-Suggested PR checklist (authors should complete before requesting review):
+## Pull Requests
 
-- [ ] The branch builds locally (LaTeX compiles without errors).
-- [ ] Figures and tables are updated and regenerated if necessary.
-- [ ] No large generated artifacts (intermediate .aux/.log/etc.) are included; see `.gitignore`.
-- [ ] Tests (if any) pass locally.
-- [ ] At least one reviewer is requested.
+- Open PRs against `main`. Keep them small and focused.
+- PR checklist:
+  - [ ] LaTeX documents compile without errors
+  - [ ] No generated artifacts (.aux, .log, .synctex.gz) included
+  - [ ] Figures and tables regenerated if changed
+  - [ ] All citations verified against actual papers
 
-## Commit message convention
-Please use short, descriptive commit messages. We recommend the minimal prefix style:
+## Commit Messages
 
 Format: `type: short description`
 
-Common types: `feat`, `fix`, `doc`, `chore`, `refactor`, `test`.
+Types: `feat`, `fix`, `doc`, `chore`, `refactor`, `test`
 
 Examples:
-- `doc: add initial proposed method description`
-- `feat: add encoding layer`
-- `fix: correct eq. (3) in section 2`
+- `doc: add transformer architecture section to overview`
+- `feat: implement Tsetlin Machine automaton in Rust`
+- `fix: correct equation numbering in chapter 5`
 
-Keep messages concise and include a scope when helpful (e.g., `doc(proposed_method): initial draft`).
+## Building Documents
 
-## Building the paper locally
-We use standard TeX toolchain (latexmk/TeX Live). To build the main paper from the repository root:
-
-```bash
-cd /workspaces/bitshifter
-latexmk -pdf -jobname=article -cd doc/article/article.tex
-```
-
-Or from the `doc/article` directory:
+Requires TeX Live with LuaLaTeX. The DevContainer includes everything needed.
 
 ```bash
-cd doc/article
-latexmk -pdf article.tex
+# Overview (50-page survey)
+cd doc/overview && latexmk -lualatex -outdir=out overview.tex
+
+# Theory book (102-page design document)
+cd doc/theory && latexmk -lualatex -outdir=out book.tex
 ```
 
-If you don't have latexmk installed, install TeX Live or your system's LaTeX distribution. Mac users can use MacTeX; Ubuntu users can install `texlive-full` (or minimal sets if preferred).
+## DevContainer
 
-## Code of conduct
-Be respectful when giving feedback. If a larger design discussion is needed, open an issue first and link it in the PR.
+The repository includes a DevContainer configuration with LuaLaTeX, Rust, and all required TeX packages. Open in VS Code with the Dev Containers extension or use GitHub Codespaces.
 
 ## Questions
-If you're unsure how to proceed with a contribution, open an issue or ping a maintainer in the PR.
+
+Open an issue or ping the maintainer.
