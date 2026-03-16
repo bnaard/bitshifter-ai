@@ -49,20 +49,20 @@ each attacking the MAC bottleneck from a different angle.
   arrow/.style={-{Stealth[length=5pt]}, thick, bitgray},
   label/.style={font=\scriptsize\sffamily, bitgray}
 ]
-  % Boxes
+  % Boxes -- wider spacing for readable arrow labels
   \node[box, fill=bitblue!10, draw=bitblue] (bnn)
     at (0,0) {\textbf{Binary Neural}\\\textbf{Networks}\\[2pt]\scriptsize XNOR + popcount};
   \node[box, fill=bitgreen!10, draw=bitgreen] (tm)
-    at (5.5,0) {\textbf{Tsetlin}\\\textbf{Machines}\\[2pt]\scriptsize Logic clauses};
+    at (8,0) {\textbf{Tsetlin}\\\textbf{Machines}\\[2pt]\scriptsize Logic clauses};
   \node[box, fill=bitorange!10, draw=bitorange] (lgn)
-    at (0,-3.5) {\textbf{Logic Gate}\\\textbf{Networks}\\[2pt]\scriptsize Learnable gates};
+    at (0,-5) {\textbf{Logic Gate}\\\textbf{Networks}\\[2pt]\scriptsize Learnable gates};
   \node[box, fill=bitpurple!10, draw=bitpurple] (kan)
-    at (5.5,-3.5) {\textbf{KAN / LUT}\\\textbf{Compilation}\\[2pt]\scriptsize Train complex,\\[-1pt]\scriptsize deploy as tables};
+    at (8,-5) {\textbf{KAN / LUT}\\\textbf{Compilation}\\[2pt]\scriptsize Train complex,\\[-1pt]\scriptsize deploy as tables};
 
   % Central node
-  \node[draw, circle, minimum size=1.8cm, fill=lightbg,
+  \node[draw, circle, minimum size=2cm, fill=lightbg,
         font=\small\sffamily\bfseries, align=center, line width=1pt]
-    (center) at (2.75,-1.75) {Hybrid\\Model};
+    (center) at (4,-2.5) {Hybrid\\Model};
 
   % Arrows to center
   \draw[arrow, bitblue]   (bnn.south east)  -- (center);
@@ -70,11 +70,15 @@ each attacking the MAC bottleneck from a different angle.
   \draw[arrow, bitorange] (lgn.north east)  -- (center);
   \draw[arrow, bitpurple] (kan.north west)  -- (center);
 
-  % Labels on arrows
-  \node[label, above, rotate=-35] at ($(bnn.south east)!0.5!(center)$) {binary weights};
-  \node[label, above, rotate=35]  at ($(tm.south west)!0.5!(center)$) {clause logic};
-  \node[label, below, rotate=35]  at ($(lgn.north east)!0.5!(center)$) {gate learning};
-  \node[label, below, rotate=-35] at ($(kan.north west)!0.5!(center)$) {LUT inference};
+  % Labels on arrows -- offset to avoid overlap
+  \node[label, above, rotate=-30, yshift=1pt]
+    at ($(bnn.south east)!0.5!(center)$) {binary weights};
+  \node[label, above, rotate=30, yshift=1pt]
+    at ($(tm.south west)!0.5!(center)$) {clause logic};
+  \node[label, below, rotate=30, yshift=-1pt]
+    at ($(lgn.north east)!0.5!(center)$) {gate learning};
+  \node[label, below, rotate=-30, yshift=-1pt]
+    at ($(kan.north west)!0.5!(center)$) {LUT inference};
 \end{tikzpicture}
 \caption{The four paradigms of bitwise neural computation and their
   convergence toward a hybrid architecture. Each contributes a different

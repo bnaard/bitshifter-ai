@@ -35,7 +35,7 @@ cheapest and fastest of these are \concept{bitwise logic operations}:
   \node[font=\scriptsize, below=0.1cm] at (and.south) {1 if both 1};
 
   % OR gate
-  \node[gate, fill=bitgreen!15] (or) at (3.5,0) {OR};
+  \node[gate, fill=bitgreen!15] (or) at (3.9,0) {OR};
   \node[bit, left=0.8cm] (b1) at (or.west) {1};
   \node[bit, left=0.8cm] (b2) at ([yshift=-0.5cm]or.west) {0};
   \node[bit, right=0.8cm] (b3) at (or.east) {1};
@@ -45,7 +45,7 @@ cheapest and fastest of these are \concept{bitwise logic operations}:
   \node[font=\scriptsize, below=0.1cm] at (or.south) {1 if either 1};
 
   % XOR gate
-  \node[gate, fill=bitorange!15] (xor) at (7,0) {XOR};
+  \node[gate, fill=bitorange!15] (xor) at (7.8,0) {XOR};
   \node[bit, left=0.8cm] (c1) at (xor.west) {1};
   \node[bit, left=0.8cm] (c2) at ([yshift=-0.5cm]xor.west) {0};
   \node[bit, right=0.8cm] (c3) at (xor.east) {1};
@@ -55,7 +55,7 @@ cheapest and fastest of these are \concept{bitwise logic operations}:
   \node[font=\scriptsize, below=0.1cm] at (xor.south) {1 if different};
 
   % NOT gate
-  \node[gate, fill=bitpurple!15] (not) at (10.5,0) {NOT};
+  \node[gate, fill=bitpurple!15] (not) at (11.7,0) {NOT};
   \node[bit, left=0.8cm] (d1) at (not.west) {1};
   \node[bit, right=0.8cm] (d2) at (not.east) {0};
   \draw[->] (d1) -- (not.west);
@@ -246,7 +246,7 @@ digit images (60,000 for training, 10,000 for testing), each
 
 \begin{figure}[htbp]
 \centering
-\begin{tikzpicture}[scale=0.12]
+\begin{tikzpicture}[scale=0.16]
   % Draw a stylised "3" as a pixel grid
   \fill[bitblue!5] (0,0) rectangle (28,28);
   \draw[bitgray!30, very thin, step=1] (0,0) grid (28,28);
@@ -271,29 +271,29 @@ digit images (60,000 for training, 10,000 for testing), each
   }
 
   % Arrow
-  \draw[-{Stealth}, very thick, bitgray] (30, 14) -- (35, 14);
+  \draw[-{Stealth}, very thick, bitgray] (30, 14) -- (34, 14);
 
   % Vector representation
-  \node[font=\small\sffamily, right] at (36, 22) {784 input values};
-  \draw[thick] (36, 6) -- (36, 20);
-  \foreach \y/\v in {19/0.00, 18/0.00, 17/0.31, 16/0.78, 15/1.00,
-    14/0.78, 13/\ldots, 12/0.00, 11/0.00, 10/\ldots, 9/0.85, 8/1.00, 7/0.63} {
-    \node[font=\tiny\ttfamily, right] at (37, \y) {\v};
+  \node[font=\small\sffamily, right] at (35, 24) {784 input values};
+  \draw[thick] (35, 5) -- (35, 22);
+  \foreach \y/\v in {21/0.00, 19.5/0.00, 18/0.31, 16.5/0.78, 15/1.00,
+    13.5/0.78, 12/\ldots, 10.5/0.00, 9/0.00, 7.5/\ldots, 6/0.85} {
+    \node[font=\tiny\ttfamily, right] at (36, \y) {\v};
   }
 
   % Arrow to output
-  \draw[-{Stealth}, very thick, bitgray] (42, 14) -- (47, 14);
+  \draw[-{Stealth}, very thick, bitgray] (41, 14) -- (45, 14);
 
   % Output
-  \node[font=\sffamily, right] at (48, 22) {Output};
+  \node[font=\sffamily, right] at (46, 24) {Output};
   \foreach \d [count=\i from 0] in {0,1,2,3,4,5,6,7,8,9} {
-    \pgfmathsetmacro{\ypos}{20 - \i * 1.5}
-    \node[font=\small\ttfamily, right] at (48, \ypos) {\d};
+    \pgfmathsetmacro{\ypos}{22 - \i * 2.0}
+    \node[font=\small\ttfamily, right] at (46, \ypos) {\d};
     \ifnum\d=3
-      \fill[bitgreen!60] (51, {\ypos-0.3}) rectangle (55, {\ypos+0.3});
-      \node[font=\tiny\sffamily, right] at (55, \ypos) {0.97};
+      \fill[bitgreen!60] (49, {\ypos-0.5}) rectangle (53, {\ypos+0.5});
+      \node[font=\tiny\sffamily, right] at (53.5, \ypos) {0.97};
     \else
-      \fill[bitgray!15] (51, {\ypos-0.3}) rectangle (51.5, {\ypos+0.3});
+      \fill[bitgray!15] (49, {\ypos-0.5}) rectangle (49.8, {\ypos+0.5});
     \fi
   }
 \end{tikzpicture}
