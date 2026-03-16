@@ -159,14 +159,78 @@ is gate $g$'s output for inputs $a, b$.
 
   % Annotation
   \node[font=\scriptsize\sffamily, bitgray, align=center] at (4.5, -0.5)
-    {Both the gate types and the wiring\\are learned during training};
+    {Gate types are learned; connectivity is random\\but \emph{effectively}
+    learned (see text)};
 \end{tikzpicture}
 \caption{A Logic Gate Network. Each node is a 2-input logic gate whose
-  type is learned. The connectivity (which nodes feed into which) is
-  also learned. At inference time, this is a pure logic circuit with
-  zero arithmetic.}
+  type is learned through differentiable relaxation. The connectivity
+  is initially random but effectively learned through gate-type
+  selection (see below). At inference time, this is a pure logic
+  circuit with zero arithmetic.}
 \label{fig:lgn-architecture}
 \end{figure}
+
+\subsubsection{How Connectivity Is ``Learned''}
+\label{sec:lgn-connectivity}
+
+The equations in the next subsection show how gate \emph{types} are
+learned, but how does the network learn its \emph{wiring}---which two
+signals feed into each gate?
+
+In the original DiffLogic architecture~\cite{petersen2022difflogic},
+the answer is surprisingly indirect: \textbf{connections are assigned
+randomly and remain fixed.} Each gate is randomly wired to two outputs
+from the previous layer at initialisation and never rewired.
+
+This sounds limiting, but it works because of a key observation:
+among the 16 possible 2-input Boolean functions, six of them
+\emph{effectively ignore one or both inputs}:
+
+\begin{table}[htbp]
+\centering
+\caption{Of the 16 possible 2-input Boolean functions, six ignore
+  at least one input. By learning to become one of these functions,
+  a gate can effectively ``disconnect'' an unwanted input.}
+\label{tab:gate-disconnect}
+\begin{tabular}{@{}llll@{}}
+  \toprule
+  \textbf{Gate function} & \textbf{Output} & \textbf{Ignores}
+    & \textbf{Effect} \\
+  \midrule
+  Constant 0  & always 0             & both $a$ and $b$
+    & dead gate (pruned) \\
+  Constant 1  & always 1             & both $a$ and $b$
+    & dead gate (pruned) \\
+  Pass-through $a$  & $a$            & input $b$
+    & wire from $a$ only \\
+  Pass-through $b$  & $b$            & input $a$
+    & wire from $b$ only \\
+  NOT $a$     & $\overline{a}$       & input $b$
+    & inverter on $a$ \\
+  NOT $b$     & $\overline{b}$       & input $a$
+    & inverter on $b$ \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\begin{keyinsight}
+Connectivity learning is \emph{subsumed by gate-type learning.} When
+the training process selects a gate type, it simultaneously decides
+the effective wiring:
+\begin{itemize}[leftmargin=1em]
+  \item A gate that learns ``AND'' uses both inputs.
+  \item A gate that learns ``pass-through $a$'' effectively
+    disconnects input $b$, acting as a simple wire.
+  \item A gate that learns ``constant 0'' effectively disconnects
+    from the network entirely.
+\end{itemize}
+The network is deliberately \emph{over-provisioned}---it starts with
+many more gates than needed, and training prunes unnecessary
+connections by turning gates into pass-throughs or constants.
+This is why the single softmax-over-16-gates mechanism
+(\cref{eq:lgn-soft}) is sufficient to learn both gate types
+\emph{and} effective connectivity.
+\end{keyinsight}
 
 \subsubsection{Training: From Soft to Hard}
 
