@@ -270,15 +270,16 @@ Tsetlin Machines achieve remarkable results on MNIST~\cite{lecun1998mnist}:
 
 \begin{table}[htbp]
 \centering
-\caption{Tsetlin Machine results on MNIST~\cite{granmo2018tsetlin}.}
+\caption{Tsetlin Machine results on MNIST. Results from the original
+  TM paper~\cite{granmo2018tsetlin} and the Convolutional TM
+  paper~\cite{granmo2019convtm}.}
 \label{tab:tm-mnist}
-\begin{tabular}{@{}lrr@{}}
+\begin{tabular}{@{}lrrl@{}}
   \toprule
-  \textbf{Configuration}     & \textbf{Accuracy} & \textbf{Clauses} \\
+  \textbf{Configuration}     & \textbf{Accuracy} & \textbf{Clauses} & \textbf{Source} \\
   \midrule
-  Basic TM (8,000 clauses)   & 98.2\%            & 8,000 \\
-  Convolutional TM            & 99.1\%            & 16,000 \\
-  State-of-art TM             & 99.35\%           & Millions \\
+  Basic TM (4{,}000/class)   & 98.2\%            & 40{,}000 & \cite{granmo2018tsetlin} \\
+  Convolutional TM            & 99.3\%            & 80{,}000 & \cite{granmo2019convtm} \\
   \bottomrule
 \end{tabular}
 \end{table}

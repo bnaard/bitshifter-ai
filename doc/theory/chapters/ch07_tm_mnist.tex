@@ -264,7 +264,7 @@ MNIST~\cite{granmo2018tsetlin, abeyrathna2021integer}:
   Weighted TM~\cite{phoulady2020weighted}
     & Thermometer ($L=8$) & 2000 & 98.6\% \\
   Convolutional TM~\cite{granmo2019convtm}
-    & Patches & 8000 & 99.35\% \\
+    & Patches & 8000 & 99.3\% \\
   \midrule
   2-layer FP network & Continuous & --- & 98.0\% \\
   \bottomrule
@@ -274,8 +274,8 @@ MNIST~\cite{granmo2018tsetlin, abeyrathna2021integer}:
 The baseline Tsetlin Machine with simple thresholding achieves
 96--97\%, which is 1--2\% below a standard floating-point network.
 With thermometer encoding and more clauses, it matches or exceeds
-the FP baseline. The convolutional variant~\cite{granmo2019convtm} reaches 99.35\%, which
-is competitive with CNNs.
+the FP baseline. The convolutional variant~\cite{granmo2019convtm} reaches 99.3\%
+(mean; 99.4\% peak), which is competitive with CNNs.
 
 \begin{engineernote}
 For our hybrid architecture, we target the baseline TM configuration

@@ -471,8 +471,9 @@ $n_\text{out}$ integer additions per layer.
     Theoretically grounded (Kolmogorov-Arnold theorem~\cite{kolmogorov1957}), highest
     accuracy among bitwise-deployable approaches, LUT compilation
     enables zero-arithmetic inference, naturally maps to FPGA LUT
-    fabric~\cite{polylut2023, lutkan2025}, graceful accuracy-memory trade-off (more table entries
-    = more accuracy).
+    fabric~\cite{polylut2023} and CPU-based edge
+    deployment~\cite{lutkan2025}, graceful accuracy-memory trade-off
+    (more table entries = more accuracy).
 
   \item[Limitations:]
     Training is slow ($\sim$10$\times$ slower than MLP with same

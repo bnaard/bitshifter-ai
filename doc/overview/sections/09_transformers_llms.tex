@@ -932,7 +932,7 @@ breakdown.
   Softmax              & \textbf{Replaceable} & Integer approximations via polynomial~\cite{kim2021ibert} or bit-shift~\cite{li2022ivit} methods demonstrated. Softmax-free alternatives (linear attention, ReLU attention) also viable. See \cref{sec:softmax-problem}. \\
   Value aggregation    & Replaceable & Weighted sum; integer weights from approximate softmax suffice. \\
   Output projection    & Replaceable & Matrix multiply; can use ternary weights. \\
-  Layer normalisation  & \textbf{Replaceable} & Integer RMSNorm via bit-shifting demonstrated in I-ViT and I-LLM~\cite{hu2024illm}. See \cref{sec:layernorm-problem}. \\
+  Layer normalisation  & \textbf{Replaceable} & Integer normalisation via I-BERT~\cite{kim2021ibert}, I-ViT~\cite{li2022ivit}, and I-LLM~\cite{hu2024illm}. See \cref{sec:layernorm-problem}. \\
   MLP weights          & Replaceable & BitNet uses ternary $\{-1,0,+1\}$. \\
   MLP activation       & Replaceable & LUT-compiled or bit-shift approximation (ShiftGELU~\cite{li2022ivit}). \\
   MoE gating           & Replaceable & Small classification; softmax over few experts. \\

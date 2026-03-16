@@ -329,14 +329,15 @@ LGNs are relatively new. Published results include:
 
 \begin{table}[htbp]
 \centering
-\caption{Logic Gate Network results~\cite{petersen2022difflogic}.}
+\caption{Logic Gate Network results on MNIST~\cite{petersen2022difflogic}.
+  The paper reports two configurations; accuracy improves with more gates.}
 \label{tab:lgn-perf}
 \begin{tabular}{@{}lrrl@{}}
   \toprule
   \textbf{Network} & \textbf{MNIST} & \textbf{Gates} & \textbf{Note} \\
   \midrule
-  DiffLogic~\cite{petersen2022difflogic}   & 97.8\%  & $\sim$100k & Differentiable training \\
-  LILogic Net        & 98.1\%  & $\sim$50k  & Learnable connectivity \\
+  DiffLogic (small)~\cite{petersen2022difflogic} & 97.7\% & 48k  & 6 layers, 8k gates/layer \\
+  DiffLogic~\cite{petersen2022difflogic}          & 98.5\% & 384k & 6 layers, 64k gates/layer \\
   \bottomrule
 \end{tabular}
 \end{table}

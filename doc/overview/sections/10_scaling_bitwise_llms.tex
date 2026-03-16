@@ -300,11 +300,12 @@ computed using only integer arithmetic and bit-shift operations:
     speedup on GPU with no accuracy loss.
 
   \item[I-ViT~\cite{li2022ivit}] (2022) introduced
-    \concept{Shiftmax}---a softmax implementation using \emph{only
-    bit-shifting operations}, eliminating even the need for integer
-    multiplication. Combined with \concept{ShiftGELU} (a bit-shift
-    approximation of the GELU activation), the entire Vision
-    Transformer runs on INT8 arithmetic and bit-shifts only.
+    \concept{Shiftmax}---a softmax implementation that replaces
+    the exponential with bit-shift approximations. Combined with
+    \concept{ShiftGELU} (a bit-shift approximation of the GELU
+    activation) and integer LayerNorm, the entire Vision Transformer
+    runs on integer arithmetic (INT8 for linear operations, INT32
+    for nonlinear operations) with no floating-point instructions.
     Result: 3.7--4.1$\times$ inference speedup with accuracy
     matching or exceeding the floating-point baseline.
 
@@ -312,10 +313,12 @@ computed using only integer arithmetic and bit-shift operations:
     inference to \emph{large language models} specifically. It
     introduces DI-ClippedSoftmax (a ``dynamic integer'' variant
     that handles the mega-activation problem) and DI-Exp (bit-shift
-    exponentiation). All nonlinear operations---softmax, GELU,
-    layer normalisation---run on integer arithmetic and bit-shifting.
-    The architecture achieves W4A4 (4-bit weights, 4-bit activations)
-    with negligible accuracy loss compared to floating-point baselines.
+    exponentiation). All nonlinear operations---softmax, SwiGLU
+    activation, layer normalisation---run on integer arithmetic and
+    bit-shifting. At W6A6 (6-bit weights and activations), accuracy
+    closely matches the floating-point baseline; at W4A4, it
+    significantly outperforms other quantisation methods, though
+    some gap to full precision remains.
 \end{description}
 
 \begin{engineernote}
@@ -347,13 +350,14 @@ radical approach is to \emph{eliminate} it entirely:
 
   \item[ReLU attention~\cite{wortsman2023relu}.]
     Replace softmax with
-    $\text{ReLU}(\bm{Q}\bm{K}^\top) / n$. ReLU is a simple
-    threshold: output the input if positive, zero otherwise. This
-    is trivially implementable with bitwise operations (check the
-    sign bit). Results on vision tasks match softmax scaling.
-    However, for \emph{language} tasks, pure ReLU attention
-    currently degrades performance---the exponential amplification
-    in softmax appears to be important for language.
+    $\text{ReLU}(\bm{Q}\bm{K}^\top) / L$ (where $L$ is the
+    sequence length). ReLU is a simple threshold: output the input
+    if positive, zero otherwise. This is trivially implementable
+    with bitwise operations (check the sign bit). On vision tasks,
+    ReLU attention matches softmax scaling on
+    ImageNet-21k~\cite{wortsman2023relu}. Whether this transfers
+    to language modelling is an open question---the cited paper
+    evaluates only vision transformers.
 
   \item[Softpick~\cite{fuadi2025softpick}] (2025) takes a
     targeted approach: it drops softmax's sum-to-one constraint
@@ -363,9 +367,10 @@ radical approach is to \emph{eliminate} it entirely:
     when no token is relevant, creating spurious attention to
     positional tokens.} and mega-activations---that plague
     quantisation. At GPTQ 2-bit quantisation, Softpick achieves
-    nearly 7$\times$ better perplexity than standard softmax.
-    It also produces 47\% sparse attention maps, reducing
-    computation. This is the most promising ``near-softmax''
+    dramatically better perplexity than standard softmax (which
+    degrades catastrophically at this precision). It also produces
+    highly sparse attention maps (95--99\% sparsity), substantially
+    reducing computation. This is the most promising ``near-softmax''
     replacement for quantisation-friendly attention.
 
   \item[Polynomial attention~\cite{poly2024softmax}.]
@@ -381,8 +386,9 @@ radical approach is to \emph{eliminate} it entirely:
     with recurrent state-space mechanisms that use element-wise
     gating instead of softmax. These are inherently more amenable
     to integer implementation, as gating is a simple multiplication
-    (or, with binary gates, a simple mask). Competitive results
-    exist at multi-billion parameter scale.
+    (or, with binary gates, a simple mask). Mamba has shown
+    competitive results at 1.4B parameters, matching transformers
+    of twice its size on some benchmarks.
 \end{description}
 
 \begin{keyinsight}
@@ -423,19 +429,20 @@ deviation. This problem turns out to be largely solved.
     This still requires a square root and division, but the
     computation is simpler than full LayerNorm.
 
-  \item[Integer RMSNorm (I-BERT~\cite{kim2021ibert}).]
+  \item[Integer LayerNorm (I-BERT~\cite{kim2021ibert}).]
     The sum of squares $\sum_i x_i^2$ is an integer operation if
     $\bm{x}$ is integer. I-BERT demonstrated an integer square-root
-    algorithm and integer division that implement the full
-    normalisation in INT32 arithmetic only.
+    algorithm and integer division that implement full LayerNorm
+    in INT32 arithmetic only. The same technique applies to the
+    simpler RMSNorm.
 
-  \item[Bit-shift RMSNorm (I-ViT~\cite{li2022ivit},
-    I-LLM~\cite{hu2024illm}).] I-ViT's DI-Normalization and
-    I-LLM's extension implement RMSNorm using only bit-shifting
-    operations. The square root is approximated via iterative
-    bit-shifts, and the division is replaced by a shift-and-add
-    sequence. The entire normalisation computation uses \emph{no
-    multiplication and no division}---only shifts and additions.
+  \item[Integer LayerNorm via bit-shifts (I-ViT~\cite{li2022ivit},
+    I-LLM~\cite{hu2024illm}).] I-ViT's I-LayerNorm and
+    I-LLM's DI-Norm implement normalisation using integer
+    arithmetic with bit-shift-based square root approximation.
+    I-LLM extends this to LLM-scale RMSNorm. The approach
+    replaces expensive floating-point operations with iterative
+    integer algorithms.
 
   \item[Pragmatic argument.] Even if normalisation stayed in
     floating point, it accounts for less than 1\% of total
@@ -446,11 +453,11 @@ deviation. This problem turns out to be largely solved.
 
 \begin{engineernote}
 Layer normalisation is a \textbf{solved problem} for integer-only
-inference. The bit-shift approaches from I-ViT and I-LLM have been
-demonstrated with no meaningful accuracy loss. The only remaining
+inference. I-BERT, I-ViT, and I-LLM have each demonstrated integer
+normalisation with no meaningful accuracy loss. The only remaining
 question is whether integer normalisation during \emph{training}
 (not just inference) causes instability---but for deployment of a
-trained model, integer RMSNorm works today.
+trained model, integer normalisation works today.
 \end{engineernote}
 
 % ----------------------------------------------------------------------------
