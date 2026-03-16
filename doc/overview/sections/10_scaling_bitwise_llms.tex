@@ -83,11 +83,11 @@ its strengths are most relevant:
     {Embedding lookup};
   \node[comp, fill=bitblue!8] (qkv) at (0, 1.5)
     {QKV projection};
-  \node[comp, fill=red!8, draw=red!40] (attn) at (0, 3)
+  \node[comp, fill=bitpurple!8, draw=bitpurple!40] (attn) at (0, 3)
     {Attention softmax};
   \node[comp, fill=bitblue!8] (oproj) at (0, 4.5)
     {Output projection};
-  \node[comp, fill=red!8, draw=red!40] (ln) at (0, 6)
+  \node[comp, fill=bitpurple!8, draw=bitpurple!40] (ln) at (0, 6)
     {Layer normalisation};
   \node[comp, fill=bitorange!8] (mlp) at (0, 7.5)
     {MLP / feed-forward};
@@ -99,12 +99,12 @@ its strengths are most relevant:
     {Integer table lookup (no paradigm needed)};
   \node[paradigm=bitblue, right] at (3.5, 1.5)
     {BitNet: ternary $\{-1, 0, +1\}$ weights};
-  \node[paradigm=red, right] at (3.5, 3)
-    {Open problem (see \cref{sec:softmax-problem})};
+  \node[paradigm=bitpurple, right] at (3.5, 3)
+    {Shiftmax / Softpick / linear attention};
   \node[paradigm=bitblue, right] at (3.5, 4.5)
     {BitNet: ternary weights};
-  \node[paradigm=red, right] at (3.5, 6)
-    {Open problem (see \cref{sec:layernorm-problem})};
+  \node[paradigm=bitpurple, right] at (3.5, 6)
+    {Bit-shift RMSNorm (I-ViT / I-LLM)};
   \node[paradigm=bitorange, right] at (3.5, 7.5)
     {LGN inference + LUT activations};
   \node[paradigm=bitgreen, right] at (3.5, 9)
@@ -116,14 +116,14 @@ its strengths are most relevant:
   }
 
   % Legend
-  \draw[thick, red!40, fill=red!8, rounded corners=2pt]
+  \draw[thick, bitblue!40, fill=bitblue!8, rounded corners=2pt]
     (-3.5, -1.5) rectangle (-1.5, -1.0);
   \node[font=\scriptsize\sffamily, right] at (-1.3, -1.25)
-    {= remaining floating-point};
-  \draw[thick, bitblue!40, fill=bitblue!8, rounded corners=2pt]
+    {= integer/ternary arithmetic (proven)};
+  \draw[thick, bitpurple!40, fill=bitpurple!8, rounded corners=2pt]
     (-3.5, -2.2) rectangle (-1.5, -1.7);
   \node[font=\scriptsize\sffamily, right] at (-1.3, -1.95)
-    {= integer/ternary arithmetic};
+    {= integer via bit-shifts (demonstrated)};
 \end{tikzpicture}
 \caption{Proposed mapping of bitwise paradigms to transformer
   components. Green and blue components can be made (near-)bitwise
@@ -252,11 +252,13 @@ scale.
 \label{sec:softmax-problem}
 % ----------------------------------------------------------------------------
 
-The attention softmax (\cref{eq:softmax}) is the single most
-important obstacle to a fully bitwise transformer. Let us examine why
-it is hard and what alternatives exist.
+The attention softmax (\cref{eq:softmax}) was initially seen as the
+single most important obstacle to a fully bitwise transformer. Recent
+research has dramatically changed this picture: multiple approaches
+now exist to implement softmax---or replace it entirely---without
+floating-point arithmetic.
 
-\subsubsection{Why Softmax Resists Binarisation}
+\subsubsection{Why Softmax Was Thought to Require Floating Point}
 
 Softmax converts a vector of raw scores $\bm{z} = [z_1, \ldots, z_n]$
 into a probability distribution:
@@ -265,72 +267,142 @@ into a probability distribution:
   \text{softmax}(z_i) = \frac{e^{z_i}}{\sum_{j=1}^{n} e^{z_j}}
 \]
 
-This operation has three properties that are fundamentally at odds
-with bitwise computation:
+Three properties make this seemingly incompatible with integer
+arithmetic:
 
 \begin{enumerate}[leftmargin=2em]
   \item \textbf{Exponentiation.} The function $e^x$ maps integers to
-    irrational numbers. There is no bitwise approximation of $e^x$
-    that preserves its essential property: amplifying differences
-    between large and small values.
+    irrational numbers, with unbounded dynamic range.
 
   \item \textbf{Normalisation.} Dividing by the sum ensures outputs
-    sum to~1. Division is the most expensive basic arithmetic
-    operation and does not have a bitwise equivalent.
+    sum to~1. Division is expensive and does not have a trivial
+    bitwise equivalent.
 
-  \item \textbf{Precision sensitivity.} The attention mechanism
-    relies on distinguishing between scores like 0.15 and 0.17. In
-    a 4{,}096-token sequence, the softmax distributes attention mass
-    across thousands of tokens, and small differences in the
-    distribution affect which information propagates forward. Binary
-    attention (attend or not) would be too coarse.
+  \item \textbf{Precision sensitivity.} Transformers produce
+    occasional ``mega-activations''---outlier values orders of
+    magnitude larger than their peers---which cause catastrophic
+    quantisation errors when softmax is naively implemented in low
+    precision.
 \end{enumerate}
 
-\subsubsection{Potential Replacements}
+\subsubsection{Approach 1: Integer-Only Softmax Approximation}
 
-Several research directions aim to reduce or eliminate the softmax:
+A series of papers has demonstrated that softmax \emph{can} be
+computed using only integer arithmetic and bit-shift operations:
 
 \begin{description}[leftmargin=1em]
-  \item[Linear attention.] Replace $\text{softmax}(\bm{Q}\bm{K}^\top)\bm{V}$
-    with $\phi(\bm{Q})\phi(\bm{K})^\top\bm{V}$, where $\phi$ is a
-    feature map (e.g., $\text{elu}(x) + 1$ or random
-    features). This avoids the $n \times n$ attention matrix entirely.
-    Linear attention has $O(n)$ complexity instead of $O(n^2)$, but
-    current models using it (e.g., RWKV, Mamba) trade some quality
-    for this efficiency.
+  \item[I-BERT~\cite{kim2021ibert}] (2021) was the first to achieve
+    fully integer-only inference for a transformer (BERT). It
+    approximates $e^x$ using a second-order polynomial evaluated
+    entirely in INT32 arithmetic, achieving a maximum error of only
+    $1.9 \times 10^{-3}$. Layer normalisation is handled with an
+    integer square-root algorithm. The result: 2.4--4.0$\times$
+    speedup on GPU with no accuracy loss.
 
-  \item[ReLU or squared attention.] Replace softmax with
-    $\text{ReLU}(\bm{Q}\bm{K}^\top)$ or
-    $(\bm{Q}\bm{K}^\top)^2$. These are non-negative (like softmax)
-    but avoid exponentiation. Squaring is just multiplication;
-    ReLU is a simple threshold (which \emph{is} a bitwise-friendly
-    operation). Recent work shows these can achieve competitive
-    quality on some tasks, but they lack softmax's normalisation,
-    which can cause training instability.
+  \item[I-ViT~\cite{li2022ivit}] (2022) introduced
+    \concept{Shiftmax}---a softmax implementation using \emph{only
+    bit-shifting operations}, eliminating even the need for integer
+    multiplication. Combined with \concept{ShiftGELU} (a bit-shift
+    approximation of the GELU activation), the entire Vision
+    Transformer runs on INT8 arithmetic and bit-shifts only.
+    Result: 3.7--4.1$\times$ inference speedup with accuracy
+    matching or exceeding the floating-point baseline.
 
-  \item[Integer softmax approximation.] Approximate $e^x$ using
-    piecewise linear functions or lookup tables, and approximate
-    division using bit shifts. This has been demonstrated in
-    inference-only quantisation (e.g., I-BERT), but typically with
-    some accuracy degradation.
+  \item[I-LLM~\cite{hu2024illm}] (2024) extended integer-only
+    inference to \emph{large language models} specifically. It
+    introduces DI-ClippedSoftmax (a ``dynamic integer'' variant
+    that handles the mega-activation problem) and DI-Exp (bit-shift
+    exponentiation). All nonlinear operations---softmax, GELU,
+    layer normalisation---run on integer arithmetic and bit-shifting.
+    The architecture achieves W4A4 (4-bit weights, 4-bit activations)
+    with negligible accuracy loss compared to floating-point baselines.
+\end{description}
+
+\begin{engineernote}
+The I-BERT $\to$ I-ViT $\to$ I-LLM progression shows a clear
+trajectory: integer-only softmax went from BERT-scale (2021) to
+Vision Transformers (2022) to LLMs (2024) in just three years.
+The bit-shift approach from I-ViT is particularly relevant for
+our bitwise agenda: \emph{bit-shifting is a bitwise operation}.
+A transformer using Shiftmax computes attention without any
+multiplication at all---only shifts and additions.
+\end{engineernote}
+
+\subsubsection{Approach 2: Softmax-Free Attention}
+
+Rather than approximating softmax in integer arithmetic, a more
+radical approach is to \emph{eliminate} it entirely:
+
+\begin{description}[leftmargin=1em]
+  \item[Linear attention~\cite{katharopoulos2020linear}.]
+    Replace $\text{softmax}(\bm{Q}\bm{K}^\top)\bm{V}$
+    with $\phi(\bm{Q})(\phi(\bm{K})^\top\bm{V})$, where $\phi$ is a
+    feature map (e.g., $\text{elu}(x) + 1$). By changing the order
+    of operations (parenthesisation), the $n \times n$ attention
+    matrix is never explicitly computed. Complexity drops from
+    $O(n^2)$ to $O(n)$. The TransNormerLLM~\cite{qin2023transnormerllm}
+    showed that linear attention with gating mechanisms can
+    \emph{outperform} softmax-attention LLMs in both accuracy and
+    efficiency at up to 7B parameters.
+
+  \item[ReLU attention~\cite{wortsman2023relu}.]
+    Replace softmax with
+    $\text{ReLU}(\bm{Q}\bm{K}^\top) / n$. ReLU is a simple
+    threshold: output the input if positive, zero otherwise. This
+    is trivially implementable with bitwise operations (check the
+    sign bit). Results on vision tasks match softmax scaling.
+    However, for \emph{language} tasks, pure ReLU attention
+    currently degrades performance---the exponential amplification
+    in softmax appears to be important for language.
+
+  \item[Softpick~\cite{fuadi2025softpick}] (2025) takes a
+    targeted approach: it drops softmax's sum-to-one constraint
+    while keeping the exponential, producing a ``rectified softmax.''
+    This eliminates two pathological behaviours---attention
+    sinks\footnote{Tokens forced to attend \emph{somewhere} even
+    when no token is relevant, creating spurious attention to
+    positional tokens.} and mega-activations---that plague
+    quantisation. At GPTQ 2-bit quantisation, Softpick achieves
+    nearly 7$\times$ better perplexity than standard softmax.
+    It also produces 47\% sparse attention maps, reducing
+    computation. This is the most promising ``near-softmax''
+    replacement for quantisation-friendly attention.
+
+  \item[Polynomial attention~\cite{poly2024softmax}.]
+    Recent work shows that softmax's effectiveness comes from
+    implicit Frobenius norm regularisation, \emph{not} from
+    producing a probability distribution. Polynomial functions
+    can provide the same regularisation effect with far simpler
+    arithmetic. Polynomials are straightforward to evaluate in
+    integer arithmetic (only multiply and add).
 
   \item[Gated attention / state-space models.] Architectures like
     Mamba~\cite{gu2024mamba} and RWKV replace attention entirely
     with recurrent state-space mechanisms that use element-wise
-    gating instead of softmax. These are more amenable to
-    integer/bitwise implementation, and have shown competitive
-    results on language modelling benchmarks at multi-billion
-    parameter scale.
+    gating instead of softmax. These are inherently more amenable
+    to integer implementation, as gating is a simple multiplication
+    (or, with binary gates, a simple mask). Competitive results
+    exist at multi-billion parameter scale.
 \end{description}
 
 \begin{keyinsight}
-The softmax problem may not need to be ``solved'' within the
-softmax framework. If state-space models (like Mamba) or linear
-attention variants prove competitive with transformers at scale,
-they offer a path to fully integer attention. The question shifts
-from ``how do we binarise softmax?'' to ``can we build LLMs without
-softmax at all?'' Early results are promising but not yet
-conclusive at the largest scales.
+The softmax problem is \emph{solved} in the engineering sense---there
+are multiple demonstrated paths:
+\begin{enumerate}[leftmargin=1em]
+  \item \textbf{Keep softmax, make it integer:} Shiftmax (I-ViT)
+    and DI-ClippedSoftmax (I-LLM) compute attention using only
+    bit-shifts and integer addition. No floating point needed.
+  \item \textbf{Replace softmax with something friendlier:}
+    Softpick, polynomial attention, or ReLU attention eliminate
+    the exponential entirely.
+  \item \textbf{Remove attention altogether:} Linear attention
+    (TransNormerLLM) and state-space models (Mamba) avoid the
+    $n \times n$ attention matrix, making the integer arithmetic
+    even simpler.
+\end{enumerate}
+The remaining question is not ``can it be done?'' but ``which
+combination of approach and architecture yields the best
+accuracy-efficiency trade-off at scale?''
 \end{keyinsight}
 
 % ----------------------------------------------------------------------------
@@ -338,11 +410,10 @@ conclusive at the largest scales.
 \label{sec:layernorm-problem}
 % ----------------------------------------------------------------------------
 
-Layer normalisation (\cref{eq:layernorm}) is the second
-floating-point holdout. It requires computing the mean and variance
-of a vector, then dividing each element by the standard deviation.
-
-The situation here is more tractable than softmax:
+Layer normalisation (\cref{eq:layernorm}) was the second
+suspected floating-point holdout. It requires computing the mean and
+variance of a vector, then dividing each element by the standard
+deviation. This problem turns out to be largely solved.
 
 \begin{description}[leftmargin=1em]
   \item[RMSNorm] (used in Llama and most modern LLMs) drops the
@@ -350,30 +421,77 @@ The situation here is more tractable than softmax:
     $\text{RMSNorm}(\bm{x}) = \bm{x} / \text{RMS}(\bm{x}) \cdot \bm{\gamma}$,
     where $\text{RMS}(\bm{x}) = \sqrt{\frac{1}{d}\sum_i x_i^2}$.
     This still requires a square root and division, but the
-    computation is simpler.
+    computation is simpler than full LayerNorm.
 
-  \item[Integer RMSNorm.] The sum of squares $\sum_i x_i^2$ is an
-    integer operation if $\bm{x}$ is integer. The square root and
-    division can be approximated with bit-shift techniques or small
-    lookup tables. Practical integer-only implementations have been
-    demonstrated in quantised inference.
+  \item[Integer RMSNorm (I-BERT~\cite{kim2021ibert}).]
+    The sum of squares $\sum_i x_i^2$ is an integer operation if
+    $\bm{x}$ is integer. I-BERT demonstrated an integer square-root
+    algorithm and integer division that implement the full
+    normalisation in INT32 arithmetic only.
 
-  \item[BitNet's approach.] BitNet b1.58 retains RMSNorm in
-    higher precision, arguing that the normalisation computation is
-    a tiny fraction of total operations (it processes $d$ values
-    per token, versus $d \times d_\text{ff}$ in the MLP). The
-    pragmatic argument: even if normalisation stays in floating
-    point, it accounts for less than 1\% of total operations.
+  \item[Bit-shift RMSNorm (I-ViT~\cite{li2022ivit},
+    I-LLM~\cite{hu2024illm}).] I-ViT's DI-Normalization and
+    I-LLM's extension implement RMSNorm using only bit-shifting
+    operations. The square root is approximated via iterative
+    bit-shifts, and the division is replaced by a shift-and-add
+    sequence. The entire normalisation computation uses \emph{no
+    multiplication and no division}---only shifts and additions.
+
+  \item[Pragmatic argument.] Even if normalisation stayed in
+    floating point, it accounts for less than 1\% of total
+    operations in a transformer. BitNet b1.58 retains RMSNorm
+    in higher precision for this reason. But with I-ViT's
+    approach, even this last fraction can be eliminated.
 \end{description}
 
 \begin{engineernote}
-Layer normalisation may be the wrong hill to die on for full
-binarisation. Even in a hypothetical ``99\% bitwise'' transformer,
-the normalisation steps contribute a negligible fraction of total
-energy and latency. The engineering priority should be the
-attention mechanism and MLP blocks, which dominate both computation
-and memory bandwidth.
+Layer normalisation is a \textbf{solved problem} for integer-only
+inference. The bit-shift approaches from I-ViT and I-LLM have been
+demonstrated with no meaningful accuracy loss. The only remaining
+question is whether integer normalisation during \emph{training}
+(not just inference) causes instability---but for deployment of a
+trained model, integer RMSNorm works today.
 \end{engineernote}
+
+% ----------------------------------------------------------------------------
+\subsection{What BitNet Actually Binarises (and What It Does Not)}
+\label{sec:bitnet-reality}
+% ----------------------------------------------------------------------------
+
+Before assessing the overall picture, it is important to understand
+precisely what BitNet b1.58~\cite{ma2024bitnet} does and does not
+binarise, since it is often described simply as ``1-bit LLM'':
+
+\begin{table}[htbp]
+\centering
+\caption{What BitNet b1.58 binarises vs.\ what remains in higher
+  precision. The ``1-bit'' label applies only to stored weight
+  matrices, not to the full computation.}
+\label{tab:bitnet-reality}
+\begin{tabular}{@{}lll@{}}
+  \toprule
+  \textbf{Component} & \textbf{BitNet b1.58} & \textbf{Precision} \\
+  \midrule
+  Linear projection weights & Ternary $\{-1,0,+1\}$ & 1.58 bits \\
+  Activations (inter-layer) & Quantised & 8-bit integer \\
+  Attention softmax & Standard & FP16 \\
+  RMSNorm & Standard & FP16 \\
+  Scaling factors & Standard & FP16 \\
+  Embedding layer & Standard & FP16 \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+Recent extensions push further: BitNet
+a4.8~\cite{wang2024bitneta48} reduces activations to 4-bit with
+hybrid sparsification (only 55\% of parameters activated), and
+QuEST~\cite{panferov2025quest} demonstrates stable
+quantisation-aware training at 1-bit for \emph{both} weights and
+activations.
+
+The gap between ``BitNet as published'' and ``fully integer-only
+transformer'' is exactly the softmax and normalisation components---which,
+as we have just seen, both have demonstrated integer solutions.
 
 % ----------------------------------------------------------------------------
 \subsection{The Realistic Picture}
@@ -381,14 +499,15 @@ and memory bandwidth.
 % ----------------------------------------------------------------------------
 
 \Cref{tab:bitwise-llm-summary} summarises the current state of each
-component.
+component, updated to reflect the integer-only attention and
+normalisation research.
 
 \begin{table}[htbp]
 \centering
 \caption{Feasibility assessment for bitwise transformer components.
   ``Proven'' means demonstrated at LLM scale (billions of parameters);
-  ``plausible'' means demonstrated at smaller scale or with minor
-  accuracy trade-offs; ``open'' means no convincing demonstration
+  ``demonstrated'' means shown to work at meaningful scale with
+  competitive accuracy; ``open'' means no convincing demonstration
   exists.}
 \label{tab:bitwise-llm-summary}
 \begin{tabular}{@{}p{3cm}lp{3cm}p{4.5cm}@{}}
@@ -398,61 +517,76 @@ component.
   \midrule
   Weight storage & BitNet (BNN) & Proven (3B+) & None---ternary weights work. \\
   Matrix multiply & BitNet (BNN) & Proven & Addition/subtraction only. \\
-  Activation fn. & KAN $\to$ LUT & Plausible & Per-layer learned activations need validation at scale. \\
-  MLP compilation & LGN & Open & Circuit depth at transformer MLP scale. \\
+  Activation fn. & KAN $\to$ LUT & Demonstrated & ShiftGELU~\cite{li2022ivit} or LUT compilation. \\
+  MLP compilation & LGN & Open & Circuit depth at transformer MLP scale (CIFAR-10 is current limit). \\
   MoE routing & Tsetlin Machine & Open & Load balancing, accuracy matching. \\
-  Attention & (see below) & Open & Softmax replacement. \\
-  Layer norm & Integer approx. & Plausible & Small accuracy trade-off acceptable. \\
+  Attention softmax & Integer approx. & Demonstrated & Shiftmax~\cite{li2022ivit}, DI-ClippedSoftmax~\cite{hu2024illm} work. Integration with ternary weights untested. \\
+  Softmax-free attn. & Linear / Mamba & Demonstrated & TransNormerLLM competitive at 7B scale~\cite{qin2023transnormerllm}. \\
+  Layer norm & Bit-shift & Demonstrated & I-ViT / I-LLM show negligible accuracy loss. \\
   \bottomrule
 \end{tabular}
 \end{table}
 
-\subsubsection{What Could Work Today}
+\subsubsection{What Works Today (Separately)}
 
-A ``mostly bitwise'' LLM using:
+Each of the following has been independently demonstrated:
 \begin{itemize}[leftmargin=2em]
-  \item Ternary weights throughout (BitNet b1.58),
-  \item LUT-compiled activation functions,
-  \item Integer-approximated RMSNorm,
-  \item Standard softmax attention (the remaining floating-point
-    component).
+  \item Ternary weights throughout (BitNet b1.58, proven at 3B+
+    parameters).
+  \item Integer-only softmax via bit-shifts (I-ViT Shiftmax,
+    I-LLM DI-ClippedSoftmax).
+  \item Integer-only layer normalisation via bit-shifts (I-ViT,
+    I-LLM).
+  \item Integer-only activation functions (ShiftGELU, or
+    LUT compilation).
+  \item Softmax-free attention at LLM scale (TransNormerLLM at 7B).
+  \item 1-bit weights \emph{and} activations training (QuEST).
 \end{itemize}
 
-This configuration would make approximately 95\% of operations
-integer or bitwise, with floating point confined to the attention
-softmax and a thin normalisation layer. It is achievable with
-today's research.
+\emph{No one has combined all of these into a single end-to-end
+integer-only LLM trained from scratch.} This integration is the
+key open problem. Each individual component works, but compounding
+approximation errors across 80+ layers with all components
+simultaneously active is uncharted territory.
 
-\subsubsection{What Could Work Soon}
+\subsubsection{The Fully Integer Transformer: Assembly Required}
 
-Replace softmax attention with a softmax-free alternative:
+The most promising configuration, based on existing research, would
+combine:
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Ternary weights} (BitNet b1.58) for all linear
+    projections.
+  \item \textbf{Shiftmax or Softpick} for attention (bit-shift or
+    quantisation-friendly softmax).
+  \item \textbf{Bit-shift RMSNorm} (from I-ViT/I-LLM) for
+    normalisation.
+  \item \textbf{LUT-compiled activations} (from KAN paradigm) or
+    \textbf{ShiftGELU} (from I-ViT) for nonlinearities.
+\end{enumerate}
+
+This would produce a transformer where \emph{every operation} is
+integer arithmetic, bit-shifting, or table lookup. No floating-point
+unit would be needed at inference time.
+
+\subsubsection{What Remains Genuinely Open}
+
 \begin{itemize}[leftmargin=2em]
-  \item State-space models (Mamba) or linear attention for the
-    sequence mixing component.
-  \item ReLU attention or gated attention as drop-in replacements
-    within the transformer structure.
-  \item Integer-approximated softmax via LUT-based $e^x$ and
-    bit-shift division.
+  \item \textbf{Integration at scale.} Combining ternary weights
+    \emph{with} integer softmax \emph{with} bit-shift normalisation
+    in a single model. The error from each approximation may compound.
+  \item \textbf{Training.} Most integer-only results are
+    inference-only. Training still typically requires higher
+    precision. QuEST is the exception but has not been demonstrated
+    beyond moderate scale.
+  \item \textbf{LGN compilation of MLPs.} Logic Gate Networks have
+    only reached CIFAR-10 scale (61M gates). Transformer MLPs at
+    7B scale have 67M parameters per layer---the numbers are
+    comparable, but the computational structure differs fundamentally.
+  \item \textbf{Tsetlin Machine MoE routing.} Tsetlin Machines
+    work well for text classification but have not been applied to
+    expert routing in a transformer.
 \end{itemize}
-
-This would push the architecture to 99\%+ bitwise/integer operations.
-The research exists in pieces; the integration and validation at
-scale is the remaining work.
-
-\subsubsection{What Remains Speculative}
-
-A \emph{fully} bitwise LLM with:
-\begin{itemize}[leftmargin=2em]
-  \item Logic Gate Network MLP blocks (compiled from trained ternary
-    MLPs),
-  \item Tsetlin Machine MoE routing,
-  \item All-integer attention and normalisation.
-\end{itemize}
-
-This is the ambitious end-state. Each component exists in isolation
-at small scale, but the integration, the compounding of
-approximation errors across 80+ layers, and the training dynamics
-at billions of parameters are all uncharted territory.
 
 % ----------------------------------------------------------------------------
 \subsection{The Path Forward}

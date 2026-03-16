@@ -916,9 +916,11 @@ breakdown.
 
 \begin{table}[htbp]
 \centering
-\caption{Floating-point dependency map of a transformer. Components
-  marked ``essential'' have no known integer-only replacement that
-  preserves competitive accuracy at LLM scale.}
+\caption{Floating-point dependency map of a transformer. Recent
+  research (I-BERT~\cite{kim2021ibert}, I-ViT~\cite{li2022ivit},
+  I-LLM~\cite{hu2024illm}) has demonstrated integer-only
+  approximations for components previously thought to require
+  floating point.}
 \label{tab:fp-map}
 \begin{tabular}{@{}p{3.2cm}p{2.5cm}p{6.5cm}@{}}
   \toprule
@@ -927,23 +929,27 @@ breakdown.
   Embedding lookup     & No  & Pure table lookup (integer index $\to$ vector). \\
   QKV projection       & Replaceable & Matrix multiply; BitNet uses ternary weights. \\
   $\bm{Q}\bm{K}^\top$ dot product & Replaceable & Integer dot product with ternary weights works. \\
-  Softmax              & \textbf{Essential} & Requires $e^x$ and division. No proven integer replacement at LLM scale. \\
-  Value aggregation    & Replaceable & Weighted sum; weights from softmax remain continuous. \\
+  Softmax              & \textbf{Replaceable} & Integer approximations via polynomial~\cite{kim2021ibert} or bit-shift~\cite{li2022ivit} methods demonstrated. Softmax-free alternatives (linear attention, ReLU attention) also viable. See \cref{sec:softmax-problem}. \\
+  Value aggregation    & Replaceable & Weighted sum; integer weights from approximate softmax suffice. \\
   Output projection    & Replaceable & Matrix multiply; can use ternary weights. \\
-  Layer normalisation  & \textbf{Difficult} & Requires mean, variance, division, square root. Integer approximations exist but with accuracy cost. \\
+  Layer normalisation  & \textbf{Replaceable} & Integer RMSNorm via bit-shifting demonstrated in I-ViT and I-LLM~\cite{hu2024illm}. See \cref{sec:layernorm-problem}. \\
   MLP weights          & Replaceable & BitNet uses ternary $\{-1,0,+1\}$. \\
-  MLP activation       & Replaceable & Could be replaced with LUT-compiled functions. \\
+  MLP activation       & Replaceable & LUT-compiled or bit-shift approximation (ShiftGELU~\cite{li2022ivit}). \\
   MoE gating           & Replaceable & Small classification; softmax over few experts. \\
   \bottomrule
 \end{tabular}
 \end{table}
 
 \begin{keyinsight}
-Of all the components in a transformer, only two \emph{fundamentally}
-resist binarisation: the \textbf{attention softmax} and
-\textbf{layer normalisation}. Everything else---projections, MLP
-weights, activations, embedding lookups---can be implemented with
-integer, ternary, or table-lookup operations. Understanding whether
-these last two bastions of floating-point can be conquered is the
-central question for building a fully bitwise LLM.
+A striking finding from recent research: \emph{every} component in
+a transformer has a demonstrated integer-only or bitwise
+approximation. The attention softmax can be replaced by polynomial
+approximations~\cite{kim2021ibert}, bit-shift
+operations~\cite{li2022ivit}, or eliminated entirely in favour of
+softmax-free attention mechanisms. Layer normalisation can be
+implemented with integer arithmetic and bit-shifts. The question is
+no longer ``can we build an integer-only transformer?'' but
+``how much accuracy do the combined approximations cost, and can
+we close that gap?'' \Cref{sec:scaling-llms} explores this in
+detail.
 \end{keyinsight}
