@@ -1,0 +1,319 @@
+% ============================================================================
+\chapter{Implementation Considerations}
+\label{ch:implementation}
+% ============================================================================
+
+This chapter discusses how to implement the hybrid architecture in
+Rust, covering data structures, performance optimisations, and the
+key design decisions for a proof-of-concept implementation.
+
+
+% ----------------------------------------------------------------------------
+\section{Why Rust?}
+\label{sec:why-rust}
+% ----------------------------------------------------------------------------
+
+The choice of Rust is motivated by three factors:
+
+\begin{enumerate}
+  \item \textbf{Performance:} Rust compiles to native code with
+    zero-cost abstractions. Bitwise operations map directly to
+    hardware instructions with no interpreter or runtime overhead.
+
+  \item \textbf{Safety:} Rust's ownership system prevents data races,
+    buffer overflows, and memory leaks at compile time. For a
+    research implementation with complex bit manipulation, this
+    catches bugs early.
+
+  \item \textbf{Portability:} Rust runs on every platform: x86,
+    ARM, RISC-V, WebAssembly. The same code can target a server,
+    a laptop, a Raspberry Pi, or a browser.
+\end{enumerate}
+
+\begin{engineernote}
+Rust's ecosystem includes excellent support for SIMD intrinsics
+(\texttt{std::arch}), which are essential for the bitwise parallel
+operations in clause evaluation. The \texttt{packed\_simd} or
+\texttt{std::simd} APIs allow writing architecture-aware bitwise
+code that exploits 256-bit or 512-bit registers.
+\end{engineernote}
+
+
+% ----------------------------------------------------------------------------
+\section{Data Representation}
+\label{sec:data-repr}
+% ----------------------------------------------------------------------------
+
+\subsection{Bit Vectors}
+
+The fundamental data structure is the \concept{packed bit vector}:
+an array of 64-bit unsigned integers where each bit represents one
+Boolean value.
+
+For 1568 literals: $\lceil 1568 / 64 \rceil = 25$ \texttt{u64} words.
+
+Key operations:
+\begin{itemize}
+  \item \textbf{AND:} Bitwise AND of two packed vectors (25
+    instructions).
+  \item \textbf{Equality check:} Compare two packed vectors word by
+    word (25 comparisons with early exit).
+  \item \textbf{Popcount:} Sum \texttt{count\_ones()} across all
+    words.
+  \item \textbf{NOT:} Bitwise NOT of each word (25 instructions).
+\end{itemize}
+
+\subsection{Clause Representation}
+
+Each clause is stored as a single packed bit vector (the include
+mask). Clause evaluation:
+
+\begin{verbatim}
+fn clause_matches(mask: &[u64; 25], input: &[u64; 25]) -> bool {
+    for i in 0..25 {
+        if (mask[i] & input[i]) != mask[i] {
+            return false;
+        }
+    }
+    true
+}
+\end{verbatim}
+
+The early exit on the first non-matching word makes this very fast
+for clauses that do not match (which is the common case due to
+sparsity).
+
+\subsection{Automaton States}
+
+During training, each automaton stores its state as a \texttt{u8}
+(for $N \leq 128$, states 1--256). The automata for one clause are
+stored in a contiguous array of 1568 \texttt{u8} values.
+
+\subsection{Gate Network}
+
+Each gate stores:
+\begin{itemize}
+  \item Gate type: 4 bits (one of 16 types), packed as \texttt{u8}.
+  \item Input indices: two \texttt{u16} values pointing to the
+    previous layer.
+\end{itemize}
+
+Total per gate: 5 bytes. For 16,000 gates: 80 kB.
+
+
+% ----------------------------------------------------------------------------
+\section{Performance-Critical Paths}
+\label{sec:critical-paths}
+% ----------------------------------------------------------------------------
+
+\subsection{Clause Evaluation (Inference Bottleneck)}
+
+Clause evaluation dominates inference time. Optimisations:
+
+\begin{enumerate}
+  \item \textbf{SIMD:} Use 256-bit AVX2 or 512-bit AVX-512
+    instructions to process 4 or 8 words per instruction instead
+    of 1. This reduces the inner loop from 25 iterations to 4--7.
+
+  \item \textbf{Early exit:} Most clauses do not match any given
+    input. Checking the first few words (which often contain the
+    most discriminative literals) allows early termination for
+    non-matching clauses.
+
+  \item \textbf{Cache layout:} Store clause masks contiguously in
+    memory so that iterating over clauses has good spatial locality.
+\end{enumerate}
+
+\subsection{Automaton Updates (Training Bottleneck)}
+
+Training is dominated by automaton state updates. Each update
+requires:
+\begin{enumerate}
+  \item A random number (for stochastic feedback).
+  \item A state increment or decrement.
+  \item Clamping to the valid range.
+\end{enumerate}
+
+Optimisations:
+\begin{itemize}
+  \item Use a fast PRNG (e.g., xoshiro256 or PCG) that produces
+    64 random bits per call, providing 64 random decisions at once.
+  \item Vectorise the state updates using SIMD on the \texttt{u8}
+    state arrays.
+\end{itemize}
+
+
+% ----------------------------------------------------------------------------
+\section{Module Structure}
+\label{sec:modules}
+% ----------------------------------------------------------------------------
+
+A suggested Rust project structure:
+
+\begin{verbatim}
+bitwise-digits/
+  src/
+    lib.rs          -- Public API
+    bitvec.rs       -- Packed bit vector operations
+    booleanise.rs   -- Thresholding + literal expansion
+    tsetlin/
+      mod.rs        -- TM public interface
+      automaton.rs  -- Single automaton state machine
+      clause.rs     -- Clause evaluation and storage
+      feedback.rs   -- Type I and Type II feedback logic
+      machine.rs    -- Full TM: clauses + voting
+    lgn/
+      mod.rs        -- LGN public interface
+      gate.rs       -- Gate types and truth tables
+      network.rs    -- Layered gate network
+      train.rs      -- Softmax relaxation + annealing
+    lut/
+      mod.rs        -- LUT public interface
+      spline.rs     -- B-spline evaluation
+      compile.rs    -- Spline-to-LUT compilation
+      score.rs      -- Scoring with compiled LUTs
+    pipeline.rs     -- End-to-end inference
+    mnist.rs        -- MNIST data loading
+  benches/
+    inference.rs    -- Inference benchmarks
+    training.rs     -- Training benchmarks
+  tests/
+    integration.rs  -- End-to-end accuracy tests
+\end{verbatim}
+
+
+% ----------------------------------------------------------------------------
+\section{Training Pipeline}
+\label{sec:training-pipeline}
+% ----------------------------------------------------------------------------
+
+\begin{algorithm}[htbp]
+\caption{Complete training pipeline.}
+\label{alg:full-training}
+\begin{algorithmic}[1]
+  \State \textbf{// Phase 1: Train Tsetlin Machine}
+  \State Load MNIST training images
+  \State Booleanise all images (threshold + expand)
+  \State Initialise TM~\cite{granmo2018tsetlin}: 500 clauses/class, $s = 5.0$, $T = 50$
+  \For{epoch $= 1$ to $50$}
+    \For{each image $(\bvec{x}, y)$ in random order}
+      \State Evaluate clauses, compute votes
+      \State Apply Type~I/II feedback
+    \EndFor
+    \State Evaluate test accuracy
+  \EndFor
+  \State Freeze TM clause masks
+  \Statex
+  \State \textbf{// Phase 2: Train Logic Gate Network}
+  \State Precompute clause outputs for all training images
+  \State Initialise LGN~\cite{petersen2022difflogic}: 4 layers, 4000 gates/layer, random wiring
+  \For{epoch $= 1$ to $100$}
+    \For{each mini-batch of clause output vectors}
+      \State Forward pass with softmax relaxation
+      \State Compute cross-entropy loss
+      \State Backward pass, update logits
+    \EndFor
+    \State Anneal temperature
+  \EndFor
+  \State Discretise: fix each gate to its argmax type
+  \Statex
+  \State \textbf{// Phase 3: Compile LUTs}
+  \State Compute popcount vectors for training set
+  \State Train B-spline scoring functions (optional)
+  \State Evaluate splines at all integer inputs
+  \State Quantise to int8/int16 lookup tables
+  \State Save complete model
+\end{algorithmic}
+\end{algorithm}
+
+
+% ----------------------------------------------------------------------------
+\section{Testing and Validation}
+\label{sec:testing}
+% ----------------------------------------------------------------------------
+
+\paragraph{Unit tests.}
+\begin{itemize}
+  \item Bit vector operations: AND, OR, NOT, popcount on known inputs.
+  \item Automaton transitions: verify reward/penalty move states
+    correctly.
+  \item Clause evaluation: manually constructed clauses on known
+    images.
+  \item Gate evaluation: all 16 gate types on all 4 input
+    combinations.
+\end{itemize}
+
+\paragraph{Integration tests.}
+\begin{itemize}
+  \item Train a TM on a tiny subset (100 images) and verify it
+    learns non-trivial clauses.
+  \item Train an LGN on synthetic clause outputs and verify gate
+    type convergence.
+  \item End-to-end: train on full MNIST and verify test accuracy
+    exceeds 95\%.
+\end{itemize}
+
+\paragraph{Benchmarks.}
+\begin{itemize}
+  \item Single-image inference latency.
+  \item Full test-set evaluation throughput (images/second).
+  \item Training time per epoch for each phase.
+  \item Comparison with a reference FP implementation (e.g., a
+    simple PyTorch 2-layer network).
+\end{itemize}
+
+
+% ----------------------------------------------------------------------------
+\section{Benchmarking Against the Floating-Point Baseline}
+\label{sec:benchmarking}
+% ----------------------------------------------------------------------------
+
+The FP baseline for comparison:
+
+\begin{itemize}
+  \item \textbf{Architecture:} 2-layer MLP, 784-300-10, ReLU
+    activation.
+  \item \textbf{Training:} SGD with learning rate 0.01, 50 epochs.
+  \item \textbf{Expected accuracy:} $\sim$98\% on MNIST~\cite{lecun1998mnist}.
+  \item \textbf{Implementation:} Either in Rust (using
+    \texttt{ndarray}) or Python/PyTorch for reference.
+\end{itemize}
+
+The benchmark should measure:
+\begin{enumerate}
+  \item \textbf{Accuracy:} Test set accuracy for both models.
+  \item \textbf{Inference speed:} Time per image, averaged over the
+    10,000 test images.
+  \item \textbf{Model size:} Total bytes of the saved model.
+  \item \textbf{Training time:} Wall-clock time for complete training.
+\end{enumerate}
+
+\begin{engineernote}
+For a fair speed comparison, both implementations should be optimised:
+the FP baseline should use BLAS-accelerated matrix operations, and
+the hybrid should use SIMD bitwise operations. Comparing unoptimised
+implementations would be misleading in either direction.
+\end{engineernote}
+
+
+% ----------------------------------------------------------------------------
+\section{Summary}
+\label{sec:ch14-summary}
+% ----------------------------------------------------------------------------
+
+The implementation of the hybrid architecture in Rust is
+straightforward because the core operations (bitwise AND, integer
+increment, table lookup) map directly to hardware instructions.
+The main engineering challenges are:
+
+\begin{enumerate}
+  \item Efficient packed bit vector operations with SIMD.
+  \item Fast random number generation for stochastic feedback.
+  \item Clean separation of training phases (integer TM, FP LGN,
+    one-time LUT compilation).
+  \item Thorough testing at every level to catch bit-manipulation bugs.
+\end{enumerate}
+
+With these components in place, the proof of concept can validate the
+hybrid architecture's accuracy, speed, and energy promises on real
+hardware.

@@ -1,0 +1,375 @@
+% ============================================================================
+\chapter{Supervised Learning from an Engineer's Perspective}
+\label{ch:learning}
+% ============================================================================
+
+This chapter introduces the concepts of supervised learning---the
+framework used to train neural networks from labelled data. If you
+have a machine learning background, you can skim this chapter; it
+establishes the vocabulary and intuition needed for the training
+methods in Parts~II--IV.
+
+
+% ----------------------------------------------------------------------------
+\section{Classification as Function Approximation}
+\label{sec:classification}
+% ----------------------------------------------------------------------------
+
+A \concept{classifier} is a function that maps an input (an image,
+a sensor reading, a document) to one of several predefined categories.
+For MNIST:
+\begin{equation}
+  f : \{0, 1, \ldots, 255\}^{784} \to \{0, 1, 2, \ldots, 9\}
+  \label{eq:classifier}
+\end{equation}
+
+We do not know the ``true'' function $f^*$ that perfectly classifies
+every possible handwritten digit. Instead, we have a dataset of
+examples $({\bvec{x}_i, y_i})$ and we want to find a function
+$\hat{f}$ that agrees with these examples and \emph{generalises} to
+unseen inputs.
+
+\begin{analogy}
+Learning a classifier from data is like learning to identify birds from
+a field guide. You study examples (``this is a robin, this is a
+sparrow''), and eventually you can identify birds you have never seen
+before---not because you memorised every bird, but because you learned
+the distinguishing features (beak shape, colouring, size).
+\end{analogy}
+
+
+% ----------------------------------------------------------------------------
+\section{Training Data, Test Data, and Overfitting}
+\label{sec:overfitting}
+% ----------------------------------------------------------------------------
+
+The 70,000 MNIST~\cite{lecun1998mnist} images are split into:
+\begin{itemize}
+  \item \textbf{Training set} (60,000 images): used to adjust the
+    model's parameters.
+  \item \textbf{Test set} (10,000 images): used only to evaluate
+    accuracy. The model never sees these during training.
+\end{itemize}
+
+\concept{Overfitting} occurs when a model memorises the training
+examples instead of learning general patterns. An overfitting model
+achieves high training accuracy but poor test accuracy.
+
+\begin{keyinsight}
+The test set is the only honest measure of a model's quality. Any
+accuracy number reported in this book refers to the test set unless
+explicitly stated otherwise.
+\end{keyinsight}
+
+
+% ----------------------------------------------------------------------------
+\section{The Traditional Artificial Neuron}
+\label{sec:neuron}
+% ----------------------------------------------------------------------------
+
+The building block of conventional neural networks is the
+\concept{artificial neuron}. It computes:
+
+\begin{equation}
+  y = \sigma\!\left(\sum_{i=1}^{n} w_i \cdot x_i + b\right)
+    = \sigma(\bvec{w} \cdot \bvec{x} + b)
+  \label{eq:neuron}
+\end{equation}
+
+where:
+\begin{itemize}
+  \item $\bvec{x} = (x_1, \ldots, x_n)$ is the input vector.
+  \item $\bvec{w} = (w_1, \ldots, w_n)$ is the \concept{weight}
+    vector (learned parameters).
+  \item $b$ is the \concept{bias} (a learned offset).
+  \item $\sigma$ is the \concept{activation function} (a nonlinear
+    function such as ReLU: $\sigma(z) = \max(0, z)$).
+\end{itemize}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  input/.style={circle, draw, minimum size=0.6cm, font=\small},
+  neuron/.style={circle, draw, minimum size=1cm, font=\small,
+    fill=bitblue!10, line width=0.8pt},
+  >=Stealth
+]
+  \foreach \i/\v in {1/x_1, 2/x_2, 3/x_n} {
+    \ifnum\i=3
+      \node[input] (in\i) at (0, 3-\i*1.2) {$\v$};
+    \else
+      \node[input] (in\i) at (0, 3-\i*1.2) {$\v$};
+    \fi
+  }
+  \node at (0, -0.4) {$\vdots$};
+
+  \node[neuron] (n) at (3.5, 0.6) {$\Sigma$};
+  \node[draw, rounded corners, fill=bitorange!10, minimum width=0.8cm,
+    font=\small] (act) at (5.5, 0.6) {$\sigma$};
+  \node[right=0.5cm, font=\small] (out) at (act.east) {$y$};
+
+  \foreach \i in {1,2,3} {
+    \draw[->, thick] (in\i) -- node[above, font=\scriptsize, sloped] {$w_\i$} (n);
+  }
+  \draw[->, thick] (n) -- (act);
+  \draw[->, thick] (act) -- (out);
+\end{tikzpicture}
+\caption{A traditional artificial neuron. The weighted sum
+  $\sum w_i x_i + b$ is computed first, then passed through a nonlinear
+  activation function $\sigma$.}
+\label{fig:neuron}
+\end{figure}
+
+The weighted sum $\bvec{w} \cdot \bvec{x} + b$ is the
+\concept{multiply-accumulate} (MAC) operation that dominates the cost
+of conventional networks. For a neuron with 784 inputs (one per MNIST
+pixel), this requires 784 floating-point multiplications and 784
+floating-point additions per neuron.
+
+
+% ----------------------------------------------------------------------------
+\section{Loss Functions}
+\label{sec:loss}
+% ----------------------------------------------------------------------------
+
+To train a model, we need a way to measure \emph{how wrong} its
+predictions are. This measurement is called the \concept{loss function}
+(or cost function).
+
+For 10-class classification (MNIST), the standard loss is
+\concept{cross-entropy loss}. The model outputs a probability
+distribution over 10 classes, and we penalise it for assigning low
+probability to the correct class.
+
+\begin{equation}
+  \mathcal{L} = -\log p_{\hat{y}}
+  \label{eq:cross-entropy}
+\end{equation}
+
+where $p_{\hat{y}}$ is the model's predicted probability for the
+correct class $\hat{y}$.
+
+\begin{example}
+Suppose the true label is ``3'' and the model outputs:
+\[
+  \bvec{p} = (0.01, 0.02, 0.05, \mathbf{0.80}, 0.03, 0.01, 0.02, 0.01, 0.03, 0.02)
+\]
+The loss is $\mathcal{L} = -\log(0.80) \approx 0.22$.
+
+If the model were less confident, outputting $p_3 = 0.10$, the loss
+would be $\mathcal{L} = -\log(0.10) \approx 2.30$---much larger,
+reflecting the worse prediction.
+\end{example}
+
+\begin{engineernote}
+Not all paradigms use cross-entropy loss. Tsetlin Machines
+(\cref{ch:clauses}) use a completely different training signal based on
+reinforcement learning. Logic Gate Networks (\cref{ch:diff-gates}) use
+cross-entropy or similar differentiable losses. Understanding the
+concept of ``measuring wrongness'' is the key; the specific formula
+varies.
+\end{engineernote}
+
+
+% ----------------------------------------------------------------------------
+\section{Gradient Descent}
+\label{sec:gradient-descent}
+% ----------------------------------------------------------------------------
+
+Given a loss function that measures prediction error, \concept{gradient
+descent} is the algorithm that adjusts the model's parameters to reduce
+that error.
+
+\begin{enumerate}
+  \item \textbf{Forward pass:} Run an input through the model, get a
+    prediction.
+  \item \textbf{Compute loss:} Measure how wrong the prediction is.
+  \item \textbf{Compute gradient:} For each parameter $w$, compute
+    $\frac{\partial \mathcal{L}}{\partial w}$---how much the loss
+    changes if we nudge $w$ slightly.
+  \item \textbf{Update:} Move each parameter in the direction that
+    reduces the loss:
+    \begin{equation}
+      w \leftarrow w - \eta \cdot \frac{\partial \mathcal{L}}{\partial w}
+      \label{eq:gradient-update}
+    \end{equation}
+    where $\eta > 0$ is the \concept{learning rate} (step size).
+\end{enumerate}
+
+\begin{analogy}
+Imagine you are blindfolded on a hillside and want to reach the valley.
+You feel the slope under your feet (the gradient) and take a step
+downhill. Repeat. You will eventually reach the bottom---maybe not the
+absolute lowest point, but a low one. Gradient descent does the same in
+the high-dimensional space of model parameters.
+\end{analogy}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth]
+  \begin{axis}[
+    width=9cm, height=5cm,
+    xlabel={Parameter $w$}, ylabel={Loss $\mathcal{L}$},
+    xmin=-3, xmax=3, ymin=0, ymax=5,
+    axis lines=middle,
+    every axis label/.style={font=\small\sffamily},
+    ticks=none
+  ]
+    % Loss curve
+    \addplot[thick, bitblue, smooth, domain=-3:3, samples=100]
+      {0.5*x^2 + 0.3*sin(deg(2*x)) + 1};
+
+    % Gradient descent steps
+    \addplot[only marks, mark=*, mark size=2.5pt, bitorange]
+      coordinates {(2, 3.21) (1.2, 1.92) (0.5, 1.41) (0.1, 1.11)};
+    \draw[->, thick, bitorange] (2, 3.21) -- (1.2, 1.92);
+    \draw[->, thick, bitorange] (1.2, 1.92) -- (0.5, 1.41);
+    \draw[->, thick, bitorange] (0.5, 1.41) -- (0.1, 1.11);
+
+    \node[font=\scriptsize\sffamily, bitorange, right] at (2.1, 3.5)
+      {start};
+  \end{axis}
+\end{tikzpicture}
+\caption{Gradient descent iteratively moves the parameter $w$ in the
+  direction that reduces the loss. Each step follows the negative
+  gradient (downhill).}
+\label{fig:gradient-descent}
+\end{figure}
+
+
+% ----------------------------------------------------------------------------
+\section{Backpropagation}
+\label{sec:backprop}
+% ----------------------------------------------------------------------------
+
+In a multi-layer network, computing $\frac{\partial \mathcal{L}}
+{\partial w}$ for a parameter deep in the network requires the
+\concept{chain rule} of calculus.
+
+If the network computes $y = f(g(h(x)))$, then:
+\begin{equation}
+  \frac{\partial y}{\partial x} =
+    \frac{\partial f}{\partial g} \cdot
+    \frac{\partial g}{\partial h} \cdot
+    \frac{\partial h}{\partial x}
+  \label{eq:chain-rule}
+\end{equation}
+
+\concept{Backpropagation} applies this chain rule layer by layer, from
+the output back to the input, efficiently computing gradients for every
+parameter in the network.
+
+\begin{engineernote}
+Backpropagation requires that every operation in the forward pass be
+\emph{differentiable}---that is, it must have a well-defined
+derivative. This is the central challenge for bitwise networks:
+discrete operations like AND and OR are \emph{not} differentiable.
+Their output jumps from 0 to~1 with no smooth transition, so the
+derivative is zero everywhere (useless for learning) or undefined
+(at the jump). The straight-through estimator~\cite{bengio2013ste} is one common
+workaround for this problem.
+\end{engineernote}
+
+
+% ----------------------------------------------------------------------------
+\section{The Differentiability Problem}
+\label{sec:diff-problem}
+% ----------------------------------------------------------------------------
+
+Consider the AND function: $f(a, b) = a \wedge b$. The function maps
+$\{0,1\}^2$ to $\{0,1\}$---it is defined only at four points. Between
+those points, there is no continuous surface, so there is no gradient.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth]
+  % Continuous neuron
+  \begin{scope}
+    \node[font=\sffamily\bfseries] at (2, 3.2) {Continuous (ReLU)};
+    \begin{axis}[
+      at={(0,0)}, width=4.5cm, height=3.5cm,
+      xmin=-2, xmax=2, ymin=-0.5, ymax=2.5,
+      axis lines=middle, ticks=none,
+      every axis label/.style={font=\tiny\sffamily}
+    ]
+      \addplot[very thick, bitblue, domain=-2:2, samples=50]
+        {max(0, x)};
+      \node[font=\tiny\sffamily, bitblue] at (axis cs:1.5, 2)
+        {smooth};
+      \draw[->, thick, bitgreen] (axis cs:1, 1) -- (axis cs:1.3, 1)
+        node[right, font=\tiny\sffamily, bitgreen] {$\nabla$};
+    \end{axis}
+  \end{scope}
+
+  % Discrete gate
+  \begin{scope}[xshift=6cm]
+    \node[font=\sffamily\bfseries] at (2, 3.2) {Discrete (AND gate)};
+    \begin{axis}[
+      at={(0,0)}, width=4.5cm, height=3.5cm,
+      xmin=-0.5, xmax=1.5, ymin=-0.5, ymax=1.5,
+      axis lines=middle, ticks=none,
+      every axis label/.style={font=\tiny\sffamily}
+    ]
+      \addplot[only marks, mark=*, mark size=3pt, bitorange]
+        coordinates {(0,0) (1,0) (0,0) (1,1)};
+      \node[font=\tiny\sffamily, bitorange] at (axis cs:0.8, 0.5)
+        {no gradient};
+    \end{axis}
+  \end{scope}
+\end{tikzpicture}
+\caption{Left: a continuous activation (ReLU) has a gradient that
+  tells us which direction to move. Right: a discrete logic gate has
+  no gradient---its outputs are isolated points with no smooth
+  connection.}
+\label{fig:diff-problem}
+\end{figure}
+
+This is the fundamental obstacle that every bitwise neural network must
+overcome. The three paradigms in this book handle it in three different
+ways:
+
+
+% ----------------------------------------------------------------------------
+\section{Three Solutions to the Differentiability Problem}
+\label{sec:three-solutions}
+% ----------------------------------------------------------------------------
+
+\begin{description}[leftmargin=1em]
+  \item[Tsetlin Machines~\cite{granmo2018tsetlin}: avoid gradients entirely.]
+    Instead of computing derivatives, Tsetlin Machines use
+    \emph{reinforcement learning}---simple reward/penalty signals that
+    nudge automata states up or down. No calculus required. The
+    learning rule is: ``if the clause helped classify correctly,
+    reinforce it; if it caused an error, weaken it.'' This is covered
+    in Chapters~\ref{ch:automaton}--\ref{ch:tm-mnist}.
+
+  \item[Logic Gate Networks~\cite{petersen2022difflogic}: use a continuous relaxation.]
+    During training, each node does not commit to a single gate type.
+    Instead, it maintains a \emph{probability distribution} over all 16
+    gate types, and its output is a differentiable weighted average.
+    Gradients flow through this weighted average. As training
+    progresses, the distribution sharpens until each node converges to
+    a single gate. This is covered in Chapters~\ref{ch:diff-gates}
+    --\ref{ch:lgn-training}.
+
+  \item[KAN/LUT~\cite{liu2024kan}: train in continuous space, deploy discretely.]
+    During training, learnable functions are smooth B-spline curves~\cite{deboor1978splines}
+    that support standard backpropagation. After training, these
+    curves are \emph{compiled} into discrete lookup tables. The
+    discretisation happens only once, at deployment time. This is
+    covered in Chapters~\ref{ch:splines}--\ref{ch:lut}.
+\end{description}
+
+\begin{keyinsight}
+Each paradigm makes a different trade-off:
+\begin{itemize}
+  \item Tsetlin: no gradients at all (simplest training, slowest
+    convergence).
+  \item LGN: gradients through a relaxation (standard training, must
+    anneal to discrete).
+  \item KAN/LUT: full gradients during training, discretisation at
+    deployment (highest training cost, smallest deployment cost).
+\end{itemize}
+The hybrid architecture uses all three, each where it is most
+effective.
+\end{keyinsight}

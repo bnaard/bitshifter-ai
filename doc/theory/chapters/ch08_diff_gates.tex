@@ -1,0 +1,335 @@
+% ============================================================================
+\chapter{Differentiable Gate Selection}
+\label{ch:diff-gates}
+% ============================================================================
+
+This chapter introduces the Logic Gate Network (LGN)~\cite{petersen2022difflogic}, a neural network
+where each node is a 2-input logic gate. The key innovation is a
+training method that uses gradient descent to \emph{select} which of
+the 16 possible gate types each node should implement. After training,
+the continuous selection mechanism is removed, leaving a pure Boolean
+circuit.
+
+
+% ----------------------------------------------------------------------------
+\section{The 16 Two-Input Boolean Functions}
+\label{sec:sixteen-gates}
+% ----------------------------------------------------------------------------
+
+As we saw in \cref{sec:truth-tables}, two binary inputs $(a, b)$
+have $2^2 = 4$ input combinations, and each combination maps to 0
+or~1. This gives $2^4 = 16$ possible functions. We list all 16:
+
+\begin{table}[htbp]
+\centering
+\caption{All 16 two-input Boolean functions, ordered by their 4-bit
+  truth table code. The code lists outputs for inputs $(0,0),
+  (0,1), (1,0), (1,1)$.}
+\label{tab:all-16}
+\begin{tabular}{@{}clcccc@{}}
+  \toprule
+  \textbf{Index} & \textbf{Name} & $(0,0)$ & $(0,1)$ & $(1,0)$ & $(1,1)$ \\
+  \midrule
+  0  & FALSE (constant 0) & 0 & 0 & 0 & 0 \\
+  1  & AND              & 0 & 0 & 0 & 1 \\
+  2  & $A \wedge \bar{B}$ (inhibit B) & 0 & 0 & 1 & 0 \\
+  3  & $A$ (project A)    & 0 & 0 & 1 & 1 \\
+  4  & $\bar{A} \wedge B$ (inhibit A) & 0 & 1 & 0 & 0 \\
+  5  & $B$ (project B)    & 0 & 1 & 0 & 1 \\
+  6  & XOR              & 0 & 1 & 1 & 0 \\
+  7  & OR               & 0 & 1 & 1 & 1 \\
+  8  & NOR              & 1 & 0 & 0 & 0 \\
+  9  & XNOR             & 1 & 0 & 0 & 1 \\
+  10 & $\bar{B}$ (NOT B)  & 1 & 0 & 1 & 0 \\
+  11 & $A \vee \bar{B}$ (imply A) & 1 & 0 & 1 & 1 \\
+  12 & $\bar{A}$ (NOT A)  & 1 & 1 & 0 & 0 \\
+  13 & $\bar{A} \vee B$ (imply B) & 1 & 1 & 0 & 1 \\
+  14 & NAND             & 1 & 1 & 1 & 0 \\
+  15 & TRUE (constant 1)  & 1 & 1 & 1 & 1 \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+Each function is uniquely identified by its 4-bit truth table code.
+We denote the truth table of gate type $g$ as $\TruthTable(g) \in
+\{0,1\}^4$, indexed by the input combination.
+
+
+% ----------------------------------------------------------------------------
+\section{The Gate Selection Problem}
+\label{sec:gate-selection}
+% ----------------------------------------------------------------------------
+
+The Logic Gate Network~\cite{petersen2022difflogic,petersen2024difflogic} consists of layers of nodes. Each node takes
+two binary inputs and produces one binary output. The question is:
+which of the 16 gate types should each node implement?
+
+If we fix the gate types, evaluation is trivial---just apply the logic
+operations. The challenge is \emph{learning} the gate types from data.
+
+\begin{keyinsight}
+A logic gate is a discrete object: it is AND or it is OR; there is no
+``halfway between AND and OR.'' Gradient descent cannot directly
+optimise a discrete choice. The LGN solves this by replacing the
+discrete choice with a continuous probability distribution over gate
+types, optimising this distribution with gradients, and then
+discretising after training.
+\end{keyinsight}
+
+
+% ----------------------------------------------------------------------------
+\section{The Continuous Relaxation}
+\label{sec:relaxation}
+% ----------------------------------------------------------------------------
+
+For each node $i$ in the network, we maintain a vector of 16
+\concept{logits}:
+\begin{equation}
+  \bvec{z}_i = (z_i^{(0)}, z_i^{(1)}, \ldots, z_i^{(15)})
+    \in \mathbb{R}^{16}
+  \label{eq:logits}
+\end{equation}
+
+These logits are converted to a probability distribution using the
+\concept{softmax} function:
+\begin{equation}
+  p_i^{(g)} = \frac{\exp(z_i^{(g)} / \tau)}
+    {\sum_{g'=0}^{15} \exp(z_i^{(g')} / \tau)}
+  \label{eq:softmax-gate}
+\end{equation}
+
+where $\tau > 0$ is the \concept{temperature} parameter.
+
+The node's output is then a \emph{weighted average} of all 16 gate
+outputs:
+\begin{equation}
+  \hat{y}_i = \sum_{g=0}^{15} p_i^{(g)} \cdot \TruthTable(g)[a_i, b_i]
+  \label{eq:relaxed-output}
+\end{equation}
+
+where $a_i, b_i \in \{0, 1\}$ are the node's two inputs, and
+$\TruthTable(g)[a_i, b_i]$ is the output of gate type $g$ on those
+inputs.
+
+\begin{example}
+Suppose a node has inputs $a = 1, b = 0$. The truth table outputs for
+this input combination are: AND gives 0, OR gives 1, XOR gives 1,
+NAND gives 1, etc. If the probabilities are
+$p^{(\text{AND})} = 0.6$ and $p^{(\text{OR})} = 0.3$ and
+$p^{(\text{others})} = 0.1$, then:
+\[
+  \hat{y} = 0.6 \times 0 + 0.3 \times 1 + 0.1 \times (\text{others})
+  = 0.3 + \cdots \approx 0.4
+\]
+The output is continuous (between 0 and 1), not binary. This is the
+price of differentiability.
+\end{example}
+
+
+% ----------------------------------------------------------------------------
+\section{Temperature Annealing}
+\label{sec:annealing}
+% ----------------------------------------------------------------------------
+
+The temperature $\tau$ controls how ``soft'' the gate selection is:
+
+\begin{itemize}
+  \item $\tau \to \infty$: All gate types have equal probability
+    ($p^{(g)} = 1/16$). The output is a uniform average. Maximum
+    exploration, minimum commitment.
+  \item $\tau \to 0$: The probability concentrates on a single gate
+    type (the one with the largest logit). The output approaches a
+    hard Boolean value. Maximum commitment, zero exploration.
+\end{itemize}
+
+During training, we anneal $\tau$ from a high value to a low value:
+
+\begin{equation}
+  \tau(t) = \tau_{\text{start}} \cdot
+    \left(\frac{\tau_{\text{end}}}{\tau_{\text{start}}}\right)^{t / t_{\max}}
+  \label{eq:anneal}
+\end{equation}
+
+where $t$ is the training step and $t_{\max}$ is the total number of
+steps.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth]
+  \begin{axis}[
+    width=10cm, height=5cm,
+    xlabel={Training progress (\%)}, ylabel={Temperature $\tau$},
+    xmin=0, xmax=100, ymin=0, ymax=5,
+    grid=major, grid style={bitgray!20},
+    every axis label/.style={font=\small\sffamily},
+    tick label style={font=\small}
+  ]
+    \addplot[thick, bitblue, smooth, domain=0:100, samples=50]
+      {5 * (0.01/5)^(x/100)};
+
+    \node[font=\scriptsize\sffamily, bitblue] at (axis cs:15, 4)
+      {explore};
+    \node[font=\scriptsize\sffamily, bitblue] at (axis cs:85, 0.8)
+      {commit};
+  \end{axis}
+\end{tikzpicture}
+\caption{Temperature annealing schedule. The temperature starts high
+  (soft selection, exploration) and decays to near zero (hard
+  selection, commitment). The exponential decay ensures a gradual
+  transition.}
+\label{fig:annealing}
+\end{figure}
+
+\begin{analogy}
+Temperature annealing is like a hiring decision. Early in the process,
+you keep many candidates under consideration (high temperature). As
+interviews proceed, you narrow the field. Eventually, you commit to
+one candidate (low temperature). The gradual narrowing avoids premature
+decisions based on limited information.
+\end{analogy}
+
+
+% ----------------------------------------------------------------------------
+\section{Why This Works: The Gradient Flow}
+\label{sec:gradient-flow}
+% ----------------------------------------------------------------------------
+
+The relaxed output (\cref{eq:relaxed-output}) is differentiable with
+respect to the logits $\bvec{z}_i$. The gradient of the loss with
+respect to logit $z_i^{(g)}$ tells us: ``if we increase the
+probability of gate type $g$ at node $i$, does the loss go up or
+down?''
+
+Specifically, if $\mathcal{L}$ is the loss:
+\begin{equation}
+  \frac{\partial \mathcal{L}}{\partial z_i^{(g)}} =
+    \frac{\partial \mathcal{L}}{\partial \hat{y}_i} \cdot
+    \frac{\partial \hat{y}_i}{\partial z_i^{(g)}}
+  \label{eq:gate-grad}
+\end{equation}
+
+The second factor involves the softmax derivative and the truth table
+values. Standard backpropagation through the network computes the
+first factor.
+
+\begin{engineernote}
+The implementation is straightforward in any automatic differentiation
+framework. For each node, the forward pass computes:
+\begin{enumerate}
+  \item Look up the 4 truth table outputs for all 16 gate types (a
+    constant $16 \times 4$ matrix).
+  \item Index into this matrix using the binary inputs $a_i, b_i$ to
+    get a 16-element vector of gate outputs.
+  \item Compute softmax of logits to get probabilities.
+  \item Dot product of probabilities and gate outputs to get
+    $\hat{y}_i$.
+\end{enumerate}
+The backward pass is handled automatically by the framework.
+\end{engineernote}
+
+
+% ----------------------------------------------------------------------------
+\section{Discretisation: From Soft to Hard}
+\label{sec:discretisation}
+% ----------------------------------------------------------------------------
+
+After training with fully annealed temperature, each node's
+probability distribution is sharply peaked at one gate type. We
+``harden'' the network by selecting the most probable gate:
+
+\begin{equation}
+  g_i^* = \arg\max_g \; z_i^{(g)}
+  \label{eq:hardening}
+\end{equation}
+
+The logits and softmax machinery are then discarded. What remains is
+a fixed Boolean circuit: each node is a specific logic gate with two
+inputs and one output.
+
+\begin{warning}
+Discretisation introduces a small accuracy drop because the
+continuous weighted average is replaced by a single gate. The drop
+is typically 0.1--0.5\% on MNIST~\cite{petersen2024difflogic}. If the annealing schedule is too
+aggressive (temperature drops too fast), the drop can be larger
+because nodes commit before finding good gate types.
+\end{warning}
+
+
+% ----------------------------------------------------------------------------
+\section{Network Topology}
+\label{sec:lgn-topology}
+% ----------------------------------------------------------------------------
+
+The LGN arranges nodes in layers. Each node in layer $l$ takes two
+inputs from layer $l-1$ (or from the input). The connectivity can be:
+
+\begin{description}[leftmargin=1em]
+  \item[Random sparse:] Each node's two inputs are randomly chosen
+    from the previous layer. This is the approach
+    in~\cite{petersen2022difflogic}. Despite the randomness, the
+    learned gate types compensate, and the network achieves
+    surprisingly good accuracy.
+
+  \item[Fully connected (impractical):] Every pair of nodes in the
+    previous layer could be an input. This has quadratic cost and is
+    not used.
+
+  \item[Structured:] Inputs are chosen based on some fixed pattern
+    (e.g., adjacent clause outputs). This can encode domain knowledge
+    but limits flexibility.
+\end{description}
+
+For our hybrid architecture, we use random sparse connectivity.
+Each layer has a fixed number of nodes, and each node's two inputs
+are independently sampled (with replacement) from the previous layer's
+outputs.
+
+\begin{engineernote}
+A typical LGN for MNIST~\cite{petersen2024difflogic}: 4--6 layers, each with 2000--5000 nodes,
+random connectivity. The final layer's outputs are aggregated
+(e.g., by popcount or a small voting circuit) to produce the
+classification decision. Total gate count: 10,000--30,000.
+At inference, each gate is a single table lookup (4 entries) or a
+bitwise operation.
+\end{engineernote}
+
+
+% ----------------------------------------------------------------------------
+\section{The Straight-Through Estimator Alternative}
+\label{sec:ste}
+% ----------------------------------------------------------------------------
+
+An alternative to the softmax relaxation is the \concept{straight-through
+estimator} (STE)~\cite{bengio2013ste}. During the forward pass, the node
+commits to a hard gate type (the argmax). During the backward pass, the
+gradient is computed \emph{as if} the soft relaxation were used.
+
+This avoids the accuracy gap between soft and hard evaluation, but
+introduces a bias in the gradient (since the backward pass does not
+match the forward pass). In practice, both approaches work well for
+LGNs; the softmax relaxation is more principled, while STE can be
+faster.
+
+
+% ----------------------------------------------------------------------------
+\section{Summary}
+\label{sec:ch8-summary}
+% ----------------------------------------------------------------------------
+
+The Logic Gate Network makes Boolean circuits learnable through three
+ideas:
+\begin{enumerate}
+  \item \textbf{Enumerate all gates:} There are only 16 two-input
+    Boolean functions. This finite set enables exhaustive
+    consideration.
+  \item \textbf{Softmax relaxation:} A probability distribution over
+    gate types makes the output continuous and differentiable.
+    Gradient descent optimises the logits.
+  \item \textbf{Temperature annealing:} Gradually reducing the
+    temperature transitions from exploration (all gates equally
+    likely) to commitment (one gate selected).
+\end{enumerate}
+
+After training and discretisation, the LGN is a pure Boolean circuit
+with zero continuous-valued operations. The next chapter describes
+how to train this network on Tsetlin Machine clause outputs.

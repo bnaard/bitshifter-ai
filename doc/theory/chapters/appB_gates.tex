@@ -1,0 +1,116 @@
+% ============================================================================
+\chapter{The 16 Two-Input Boolean Functions}
+\label{app:gates}
+% ============================================================================
+
+This appendix provides the complete reference for all 16 two-input
+Boolean functions. Each function is identified by its 4-bit truth
+table code (outputs for inputs $(0,0), (0,1), (1,0), (1,1)$).
+
+\begin{table}[htbp]
+\centering
+\caption{Complete table of all 16 two-input Boolean functions.}
+\label{tab:all-16-full}
+\begin{tabular}{@{}ccccccll@{}}
+  \toprule
+  \textbf{Index} & $(0,0)$ & $(0,1)$ & $(1,0)$ & $(1,1)$
+    & \textbf{Code} & \textbf{Name} & \textbf{Expression} \\
+  \midrule
+  0  & 0 & 0 & 0 & 0 & 0000 & FALSE     & $0$ \\
+  1  & 0 & 0 & 0 & 1 & 0001 & AND       & $A \wedge B$ \\
+  2  & 0 & 0 & 1 & 0 & 0010 & Inhibit B & $A \wedge \bar{B}$ \\
+  3  & 0 & 0 & 1 & 1 & 0011 & Project A & $A$ \\
+  4  & 0 & 1 & 0 & 0 & 0100 & Inhibit A & $\bar{A} \wedge B$ \\
+  5  & 0 & 1 & 0 & 1 & 0101 & Project B & $B$ \\
+  6  & 0 & 1 & 1 & 0 & 0110 & XOR       & $A \oplus B$ \\
+  7  & 0 & 1 & 1 & 1 & 0111 & OR        & $A \vee B$ \\
+  8  & 1 & 0 & 0 & 0 & 1000 & NOR       & $\overline{A \vee B}$ \\
+  9  & 1 & 0 & 0 & 1 & 1001 & XNOR      & $\overline{A \oplus B}$ \\
+  10 & 1 & 0 & 1 & 0 & 1010 & NOT B     & $\bar{B}$ \\
+  11 & 1 & 0 & 1 & 1 & 1011 & Imply A   & $A \vee \bar{B}$ \\
+  12 & 1 & 1 & 0 & 0 & 1100 & NOT A     & $\bar{A}$ \\
+  13 & 1 & 1 & 0 & 1 & 1101 & Imply B   & $\bar{A} \vee B$ \\
+  14 & 1 & 1 & 1 & 0 & 1110 & NAND      & $\overline{A \wedge B}$ \\
+  15 & 1 & 1 & 1 & 1 & 1111 & TRUE      & $1$ \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+
+% ----------------------------------------------------------------------------
+\section{Properties and Relationships}
+\label{sec:gate-properties}
+% ----------------------------------------------------------------------------
+
+\paragraph{Complementary pairs.}
+Each function $g$ has a complement $\bar{g} = 15 - g$ (bitwise NOT
+of the truth table):
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+  AND (1) $\leftrightarrow$ NAND (14) &
+  OR (7) $\leftrightarrow$ NOR (8) \\
+  XOR (6) $\leftrightarrow$ XNOR (9) &
+  FALSE (0) $\leftrightarrow$ TRUE (15) \\
+  Project A (3) $\leftrightarrow$ NOT A (12) &
+  Project B (5) $\leftrightarrow$ NOT B (10) \\
+  Inhibit B (2) $\leftrightarrow$ Imply B (13) &
+  Inhibit A (4) $\leftrightarrow$ Imply A (11) \\
+\end{tabular}
+\end{center}
+
+\paragraph{Symmetric functions.}
+Functions where swapping $A$ and $B$ does not change the output:
+AND (1), OR (7), XOR (6), XNOR (9), NAND (14), NOR (8), FALSE (0),
+TRUE (15). The remaining 8 functions are asymmetric.
+
+\paragraph{Functionally complete subsets.}
+\begin{itemize}
+  \item $\{\text{NAND}\}$ alone is functionally complete.
+  \item $\{\text{NOR}\}$ alone is functionally complete.
+  \item $\{\text{AND}, \text{NOT}\}$ is functionally complete.
+  \item $\{\text{AND}, \text{OR}, \text{NOT}\}$ is the classical
+    complete set.
+\end{itemize}
+
+The LGN~\cite{petersen2022difflogic} uses all 16 functions, which is more than sufficient for
+completeness. This redundancy is beneficial: having all gate types
+available means the network can represent any function with fewer
+layers than a NAND-only circuit.
+
+
+% ----------------------------------------------------------------------------
+\section{Implementation as Lookup Tables}
+\label{sec:gate-lut}
+% ----------------------------------------------------------------------------
+
+Each gate type is implemented as a 4-entry lookup table stored in
+the low 4 bits of a single byte:
+
+\begin{verbatim}
+const GATE_LUT: [u8; 16] = [
+    0b0000, // 0:  FALSE
+    0b0001, // 1:  AND
+    0b0010, // 2:  A AND NOT B
+    0b0011, // 3:  A
+    0b0100, // 4:  NOT A AND B
+    0b0101, // 5:  B
+    0b0110, // 6:  XOR
+    0b0111, // 7:  OR
+    0b1000, // 8:  NOR
+    0b1001, // 9:  XNOR
+    0b1010, // 10: NOT B
+    0b1011, // 11: A OR NOT B
+    0b1100, // 12: NOT A
+    0b1101, // 13: NOT A OR B
+    0b1110, // 14: NAND
+    0b1111, // 15: TRUE
+];
+
+fn eval_gate(gate_type: u8, a: bool, b: bool) -> bool {
+    let index = ((a as u8) << 1) | (b as u8);
+    (GATE_LUT[gate_type as usize] >> index) & 1 == 1
+}
+\end{verbatim}
+
+This evaluates any of the 16 gate types in constant time with two
+shifts, one OR, one AND, and one comparison---no branching required.

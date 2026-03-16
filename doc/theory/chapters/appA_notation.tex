@@ -1,0 +1,101 @@
+% ============================================================================
+\chapter{Notation Reference}
+\label{app:notation}
+% ============================================================================
+
+\begin{table}[htbp]
+\centering
+\caption{General notation.}
+\begin{tabular}{@{}ll@{}}
+  \toprule
+  \textbf{Symbol} & \textbf{Meaning} \\
+  \midrule
+  $x, y, z$ & Scalars (lowercase italic) \\
+  $\bvec{x}, \bvec{w}$ & Vectors (bold lowercase) \\
+  $\bmat{W}$ & Matrices (bold uppercase) \\
+  $\{0, 1\}$ & Binary / Boolean values \\
+  $\{-1, +1\}$ & Bipolar binary values \\
+  $\bar{x}$ & Boolean complement: $\bar{x} = 1 - x$ \\
+  $\wedge, \vee$ & Logical AND, OR \\
+  $\oplus$ & Logical XOR \\
+  $|S|$ & Cardinality of set $S$ \\
+  $[n]$ & The set $\{1, 2, \ldots, n\}$ \\
+  $\mathbf{1}[\cdot]$ & Indicator function: 1 if condition is true, 0 otherwise \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{MNIST and data notation.}
+\begin{tabular}{@{}ll@{}}
+  \toprule
+  \textbf{Symbol} & \textbf{Meaning} \\
+  \midrule
+  $p_k$ & Raw pixel value, $p_k \in \{0, \ldots, 255\}$ \\
+  $\theta$ & Booleanisation threshold (default 127) \\
+  $x_k$ & Boolean pixel feature: $x_k = \mathbf{1}[p_k > \theta]$ \\
+  $\bar{x}_k$ & Negated feature: $\bar{x}_k = 1 - x_k$ \\
+  $\ell_k$ & A literal (either $x_k$ or $\bar{x}_k$) \\
+  $n$ & Number of input features (784 pixels) \\
+  $K$ & Number of classes (10 for MNIST) \\
+  $y$ & True class label \\
+  $\hat{y}$ & Predicted class label \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{Tsetlin Machine notation.}
+\begin{tabular}{@{}ll@{}}
+  \toprule
+  \textbf{Symbol} & \textbf{Meaning} \\
+  \midrule
+  $N$ & Number of states per action in each automaton \\
+  $s$ & Automaton state, $s \in \{1, \ldots, 2N\}$ \\
+  $C_j^+, C_j^-$ & Positive/negative clause $j$ \\
+  $v_k$ & Clause vote for class $k$ \\
+  $T$ & Vote clipping threshold \\
+  $s$ (parameter) & Specificity parameter \\
+  $m$ & Number of clauses per class \\
+  $\bvec{m}$ & Clause include bitmask \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{Logic Gate Network notation.}
+\begin{tabular}{@{}ll@{}}
+  \toprule
+  \textbf{Symbol} & \textbf{Meaning} \\
+  \midrule
+  $g$ & Gate type index, $g \in \{0, \ldots, 15\}$ \\
+  $\TruthTable(g)$ & Truth table of gate type $g$ (4-bit vector) \\
+  $\bvec{z}_i$ & Logit vector for node $i$ ($\in \mathbb{R}^{16}$) \\
+  $p_i^{(g)}$ & Probability of gate type $g$ at node $i$ \\
+  $\tau$ & Softmax temperature \\
+  $\hat{y}_i$ & Relaxed (continuous) output of node $i$ \\
+  $g_i^*$ & Selected gate type after discretisation \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{LUT and scoring notation.}
+\begin{tabular}{@{}ll@{}}
+  \toprule
+  \textbf{Symbol} & \textbf{Meaning} \\
+  \midrule
+  $\phi_k$ & Learned scoring function for class $k$ \\
+  $c_i$ & B-spline control point $i$ \\
+  $B_{i,k}(x)$ & B-spline basis function \\
+  $\text{LUT}_k$ & Compiled lookup table for class $k$ \\
+  $b$ & Quantisation bit width \\
+  $s_k$ & Score for class $k$ \\
+  $\popcount(\cdot)$ & Number of 1-bits in a binary word \\
+  \bottomrule
+\end{tabular}
+\end{table}

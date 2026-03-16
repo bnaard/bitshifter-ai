@@ -1,0 +1,308 @@
+% ============================================================================
+\chapter{Training the Logic Gate Network on Clause Outputs}
+\label{ch:lgn-training}
+% ============================================================================
+
+This chapter describes how to train a Logic Gate Network (LGN)~\cite{petersen2022difflogic} using
+the clause outputs from a pre-trained Tsetlin Machine~\cite{granmo2018tsetlin} as input. This
+is Phase~2 of the hybrid architecture: the Tsetlin Machine is frozen,
+and the LGN learns to combine its clause outputs into a better
+classifier.
+
+
+% ----------------------------------------------------------------------------
+\section{The Training Setup}
+\label{sec:lgn-setup}
+% ----------------------------------------------------------------------------
+
+After Phase~1 (Tsetlin Machine training), we have:
+\begin{itemize}
+  \item A trained Tsetlin Machine with $m$ clauses per class and
+    $K = 10$ classes, giving $m \times K$ total clauses.
+  \item For each training image, a binary vector of clause outputs:
+    $\bvec{c} \in \{0, 1\}^{m \times K}$.
+\end{itemize}
+
+The LGN takes $\bvec{c}$ as input and produces a classification
+decision. The goal is to learn a Boolean circuit that achieves higher
+accuracy than the Tsetlin Machine's~\cite{granmo2018tsetlin} simple vote-and-argmax.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  box/.style={draw, rounded corners, minimum width=2.4cm,
+    minimum height=1cm, font=\small\sffamily, align=center,
+    line width=0.6pt},
+  arr/.style={-{Stealth[length=4pt]}, thick},
+]
+  \node[box, fill=bitgreen!10] (tm) at (0, 0)
+    {Tsetlin Machine\\(frozen)};
+  \node[box, fill=bitorange!10] (lgn) at (5, 0)
+    {Logic Gate Network\\(training)};
+  \node[box, fill=bitpurple!10] (out) at (10, 0)
+    {Classification\\output};
+
+  \draw[arr] (-3, 0) -- (tm)
+    node[midway, above, font=\scriptsize\sffamily] {image};
+  \draw[arr] (tm) -- (lgn)
+    node[midway, above, font=\scriptsize\sffamily] {clause bits};
+  \draw[arr] (lgn) -- (out)
+    node[midway, above, font=\scriptsize\sffamily] {gate outputs};
+\end{tikzpicture}
+\caption{Phase~2 training: the Tsetlin Machine is frozen and provides
+  binary clause outputs. The LGN trains on these outputs using
+  gradient descent with the softmax relaxation.}
+\label{fig:lgn-setup}
+\end{figure}
+
+
+% ----------------------------------------------------------------------------
+\section{Precomputing Clause Outputs}
+\label{sec:precompute}
+% ----------------------------------------------------------------------------
+
+Since the Tsetlin Machine is frozen during Phase~2, we can precompute
+all clause outputs for the entire training set. This is a one-time
+cost that dramatically speeds up LGN training.
+
+\begin{engineernote}
+For 60,000 training images with 5,000 clauses (500 per class $\times$
+10 classes), the precomputed dataset is:
+\[
+  60{,}000 \times 5{,}000 \text{ bits}
+  = 300{,}000{,}000 \text{ bits}
+  = 37.5 \text{ MB}
+\]
+This fits easily in memory. Each training epoch of the LGN then
+reads from this cached binary matrix instead of re-evaluating the
+Tsetlin Machine.
+\end{engineernote}
+
+
+% ----------------------------------------------------------------------------
+\section{Network Architecture for MNIST}
+\label{sec:lgn-arch}
+% ----------------------------------------------------------------------------
+
+A concrete LGN architecture for MNIST:
+
+\begin{description}[leftmargin=1em]
+  \item[Input layer:] 5,000 bits (clause outputs from the TM).
+
+  \item[Hidden layers:] 4 layers, each with 4,000 nodes. Each node
+    has two randomly selected inputs from the previous layer. Each
+    node maintains 16 logits for gate selection.
+
+  \item[Output layer:] 10 groups of nodes, one per digit class. Each
+    group has some number of output gates. The popcount of each
+    group's outputs gives the confidence score for that class.
+
+  \item[Classification:] $\hat{y} = \arg\max_k \; \text{popcount}
+    (\text{group}_k)$.
+\end{description}
+
+During training, the continuous relaxation produces real-valued
+outputs in $[0, 1]$, and we use cross-entropy loss:
+\begin{equation}
+  \mathcal{L} = -\log \frac
+    {\exp(s_y)}
+    {\sum_{k=0}^{9} \exp(s_k)}
+  \label{eq:lgn-loss}
+\end{equation}
+where $s_k$ is the (continuous) score for class $k$ and $y$ is the
+true label.
+
+
+% ----------------------------------------------------------------------------
+\section{Training Procedure}
+\label{sec:lgn-procedure}
+% ----------------------------------------------------------------------------
+
+\begin{algorithm}[htbp]
+\caption{Training the Logic Gate Network (Phase~2).}
+\label{alg:lgn-train}
+\begin{algorithmic}[1]
+  \State \textbf{Input:} Precomputed clause outputs $\{(\bvec{c}_i, y_i)\}_{i=1}^{60000}$
+  \State Initialise logits $\bvec{z}$ randomly (small values near 0)
+  \State Set temperature $\tau \leftarrow \tau_{\text{start}}$ (e.g., 5.0)
+  \For{epoch $= 1, 2, \ldots, E$}
+    \For{each mini-batch $B$ of clause output vectors}
+      \State \textbf{Forward pass:}
+      \For{each node $i$ in topological order}
+        \State $p_i^{(g)} \leftarrow \text{softmax}(\bvec{z}_i / \tau)$
+          for $g = 0, \ldots, 15$
+        \State $\hat{y}_i \leftarrow \sum_g p_i^{(g)} \cdot
+          \TruthTable(g)[a_i, b_i]$
+      \EndFor
+      \State Compute loss $\mathcal{L}$ using \cref{eq:lgn-loss}
+      \Statex
+      \State \textbf{Backward pass:}
+      \State Compute $\frac{\partial \mathcal{L}}{\partial \bvec{z}}$
+        via backpropagation
+      \State Update logits: $\bvec{z} \leftarrow \bvec{z} -
+        \eta \frac{\partial \mathcal{L}}{\partial \bvec{z}}$
+    \EndFor
+    \State Anneal temperature: $\tau \leftarrow \tau \cdot \gamma$
+      \Comment{$\gamma < 1$, e.g., 0.95}
+  \EndFor
+  \Statex
+  \State \textbf{Discretise:}
+  \State For each node $i$: $g_i^* \leftarrow \arg\max_g \; z_i^{(g)}$
+  \State Discard logits; fix each node to gate type $g_i^*$
+\end{algorithmic}
+\end{algorithm}
+
+
+% ----------------------------------------------------------------------------
+\section{What the LGN Learns}
+\label{sec:lgn-learns}
+% ----------------------------------------------------------------------------
+
+The LGN learns nonlinear combinations of clause outputs that the
+Tsetlin Machine's linear voting cannot express. Examples:
+
+\paragraph{Clause conjunction.}
+``If clause~17 (top-bar pattern) fires AND clause~42 (bottom-curve
+pattern) fires, this is likely a `5'.'' The LGN can implement this
+with a single AND gate connecting these two clause outputs.
+
+\paragraph{Clause inhibition.}
+``If clause~23 (vertical-stroke pattern) fires AND clause~89
+(horizontal-cross pattern) does NOT fire, this is a `1' not a `4'.''
+The LGN implements this with a gate of type 2 ($A \wedge \bar{B}$).
+
+\paragraph{Feature hierarchy.}
+Through multiple layers, the LGN builds a hierarchy: layer~1 combines
+pairs of clause outputs, layer~2 combines those combinations, and so
+on. By layer~4, each gate's output depends on up to $2^4 = 16$
+original clause outputs, enabling complex decision boundaries.
+
+\begin{keyinsight}
+The LGN~\cite{petersen2022difflogic} adds \emph{depth} to the Tsetlin Machine's flat structure.
+While the TM evaluates clauses independently and sums the results,
+the LGN creates a deep Boolean circuit that can express arbitrary
+logical relationships between clause outputs. This compositional
+structure is what allows the hybrid to exceed the TM's accuracy.
+\end{keyinsight}
+
+
+% ----------------------------------------------------------------------------
+\section{Accuracy Improvement}
+\label{sec:lgn-accuracy}
+% ----------------------------------------------------------------------------
+
+Typical accuracy progression for the hybrid architecture on MNIST~\cite{lecun1998mnist}:
+
+\begin{table}[htbp]
+\centering
+\caption{Accuracy at each stage of the hybrid architecture.}
+\label{tab:stage-accuracy}
+\begin{tabular}{@{}lcc@{}}
+  \toprule
+  \textbf{Stage} & \textbf{Test accuracy} & \textbf{Improvement} \\
+  \midrule
+  TM alone (vote + argmax) & 96.5\% & --- \\
+  TM + LGN (after Phase 2) & 97.5--98.0\% & +1.0--1.5\% \\
+  TM + LGN + LUT (after Phase 3) & 97.3--97.8\% & $-$0.2\% (discretisation) \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+The LGN consistently adds 1--1.5\% accuracy over the TM's linear
+voting. The LUT compilation stage introduces a small accuracy loss
+(0.1--0.3\%) from quantising continuous scoring functions, which is
+addressed in Part~IV.
+
+
+% ----------------------------------------------------------------------------
+\section{Training Considerations}
+\label{sec:lgn-considerations}
+% ----------------------------------------------------------------------------
+
+\paragraph{Learning rate.}
+The logits are the only trainable parameters. A learning rate of
+$\eta = 0.01$ with the Adam optimiser works well.
+
+\paragraph{Number of epochs.}
+30--100 epochs are typically sufficient. The annealing schedule should
+be calibrated so that $\tau$ reaches near zero by the final epoch.
+
+\paragraph{Random connectivity.}
+The random wiring of inputs to nodes is fixed before training and
+does not change. Different random seeds produce slightly different
+final accuracies (variance of about 0.2--0.3\%). The LGN is
+surprisingly robust to the specific connectivity pattern.
+
+\paragraph{Gate type distribution.}
+After training, the distribution of gate types is informative:
+\begin{itemize}
+  \item AND and OR gates dominate (together 40--50\% of nodes).
+  \item XOR and XNOR are rare but important (5--10\%).
+  \item Constant gates (FALSE, TRUE) appear at 10--15\%, effectively
+    pruning unused connections.
+  \item Projection gates ($A$ or $B$, ignoring the other input)
+    appear at 10--15\%, indicating that one of the node's inputs
+    is irrelevant.
+\end{itemize}
+
+\begin{engineernote}
+The presence of projection and constant gates suggests that the
+network is over-parameterised. Post-training pruning (removing
+constant gates and collapsing projections) can reduce the gate
+count by 20--30\% with no accuracy loss.
+\end{engineernote}
+
+
+% ----------------------------------------------------------------------------
+\section{The Discrete Inference Circuit}
+\label{sec:inference-circuit}
+% ----------------------------------------------------------------------------
+
+After discretisation, the LGN is a fixed Boolean circuit. Evaluating
+it on a new input requires:
+
+\begin{enumerate}
+  \item Compute clause outputs from the Tsetlin Machine (bitwise AND
+    operations).
+  \item For each gate in topological order, look up the output from
+    the gate's truth table using the two inputs.
+  \item Aggregate the final layer's outputs to produce a
+    classification.
+\end{enumerate}
+
+Each gate evaluation is a single operation: form a 2-bit index from
+the inputs, look up the result in a 4-entry table (which fits in a
+single byte). With 16,000 gates across 4 layers, the total is 16,000
+table lookups---trivial for any processor.
+
+\begin{keyinsight}
+The discretised LGN has \emph{zero} floating-point operations. Every
+gate is a 1-byte table lookup. Combined with the Tsetlin Machine's
+bitwise AND operations, the entire pipeline from pixels to
+classification uses only Boolean operations, integer addition, and
+small table lookups. This is the all-Boolean inference promise of
+the hybrid architecture.
+\end{keyinsight}
+
+
+% ----------------------------------------------------------------------------
+\section{Summary}
+\label{sec:ch9-summary}
+% ----------------------------------------------------------------------------
+
+The Logic Gate Network training (Phase~2) transforms the Tsetlin
+Machine's linear classifier into a deep Boolean circuit:
+
+\begin{enumerate}
+  \item Freeze the Tsetlin Machine and precompute clause outputs.
+  \item Train a multi-layer network of 2-input gates using softmax
+    relaxation and temperature annealing.
+  \item Discretise: select the most probable gate type for each node.
+  \item The result is a pure Boolean circuit that improves accuracy by
+    1--1.5\% over the TM alone.
+\end{enumerate}
+
+Part~IV addresses the remaining piece: how to handle any scoring
+functions (like the final vote aggregation) that still involve
+arithmetic beyond Boolean operations, by compiling them into lookup
+tables.

@@ -1,0 +1,268 @@
+% ============================================================================
+\chapter{The Problem and the Promise}
+\label{ch:problem}
+% ============================================================================
+
+\section{What This Book Is About}
+
+This book describes a single, concrete neural network architecture and
+explains every piece of it from the ground up. By the end, you will
+understand not just \emph{what} the architecture does, but \emph{why}
+each design choice was made and \emph{how} to implement it.
+
+The architecture is a hybrid of three components:
+\begin{enumerate}
+  \item A \textbf{Tsetlin Machine}~\cite{granmo2018tsetlin} that learns interpretable Boolean
+    rules from raw pixel data.
+  \item A \textbf{Logic Gate Network}~\cite{petersen2022difflogic} that learns which logic gates
+    best combine those rules into a classification decision.
+  \item A \textbf{Lookup Table compiler}~\cite{liu2024kan} that converts any remaining
+    learned functions into precomputed memory tables.
+\end{enumerate}
+
+The task is handwritten digit recognition on the MNIST dataset. The
+implementation language is Rust. The ambition is simple: demonstrate
+that a neural network built entirely from Boolean operations and memory
+lookups can recognise digits with competitive accuracy---and do so
+faster and with less energy than a conventional floating-point model~\cite{horowitz2014energy}.
+
+
+\section{The MNIST Digit Recognition Task}
+\label{sec:mnist-task}
+
+The MNIST dataset~\cite{lecun1998mnist} is the ``Hello World'' of
+machine learning. It consists of 70,000 images of handwritten digits
+(0 through 9), each a $28 \times 28$ pixel grayscale image.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[scale=0.15]
+  % Grid
+  \fill[bitblue!5] (0,0) rectangle (28,28);
+  \draw[bitgray!20, very thin, step=1] (0,0) grid (28,28);
+
+  % Stylised "7"
+  \foreach \x/\y in {
+    8/24, 9/24, 10/24, 11/24, 12/24, 13/24, 14/24, 15/24, 16/24, 17/24, 18/24, 19/24,
+    18/23, 19/23,
+    17/22, 18/22,
+    16/21, 17/21,
+    15/20, 16/20,
+    14/19, 15/19,
+    14/18, 15/18,
+    13/17, 14/17,
+    13/16, 14/16,
+    12/15, 13/15,
+    12/14, 13/14,
+    11/13, 12/13,
+    11/12, 12/12,
+    11/11, 12/11
+  }{
+    \fill[bitblue!60] (\x,\y) rectangle ++(1,1);
+  }
+
+  % Annotations
+  \draw[<->, thick, bitgray] (-1, 0) -- (-1, 28)
+    node[midway, left, font=\small\sffamily] {28\,px};
+  \draw[<->, thick, bitgray] (0, -1) -- (28, -1)
+    node[midway, below, font=\small\sffamily] {28\,px};
+\end{tikzpicture}
+\hspace{2cm}
+\begin{tikzpicture}[scale=1]
+  % Flattened vector
+  \node[font=\sffamily\bfseries] at (0, 3.5) {Flattened};
+  \draw[thick] (0, 0) -- (0, 3);
+  \foreach \y/\v in {2.8/0, 2.5/0, 2.2/0.72, 1.9/0.95, 1.6/0.88,
+    1.3/\ldots, 1.0/0, 0.7/0.31, 0.4/0} {
+    \node[font=\tiny\ttfamily, right] at (0.1, \y) {\v};
+  }
+  \node[font=\scriptsize\sffamily, bitgray] at (0.5, -0.3)
+    {784 values};
+
+  % Arrow
+  \draw[-{Stealth}, thick] (1.5, 1.5) -- (3, 1.5);
+  \node[font=\scriptsize\sffamily] at (2.25, 1.9) {classify};
+
+  % Output
+  \node[draw, rounded corners, fill=bitgreen!20, minimum width=1.5cm,
+    minimum height=0.8cm, font=\sffamily\bfseries] at (4, 1.5) {7};
+\end{tikzpicture}
+\caption{The MNIST task. A $28 \times 28$ grayscale image is flattened into
+  a vector of 784 values (each in $[0, 255]$ or normalised to $[0, 1]$),
+  and the network must output the correct digit label.}
+\label{fig:mnist-task}
+\end{figure}
+
+\begin{itemize}
+  \item \textbf{Training set:} 60,000 labelled images used to teach the
+    model.
+  \item \textbf{Test set:} 10,000 labelled images, never seen during
+    training, used to measure accuracy.
+  \item \textbf{Baseline:} A standard two-layer floating-point neural
+    network achieves approximately 98\% accuracy on the test set.
+\end{itemize}
+
+MNIST is deliberately simple. We choose it not to set records but to
+have a well-understood benchmark where we can focus entirely on the
+architecture rather than on data engineering or scale.
+
+
+\section{Why Bitwise? The Energy and Hardware Argument}
+\label{sec:why-bitwise}
+
+Every neural network in production today is built on a single
+operation: \concept{multiply-accumulate} (MAC). Multiply a number by
+a weight, add to a running total. Repeat billions of times.
+
+This operation is expensive. \Cref{tab:energy-cost} shows the energy
+cost of different operations in a modern chip.
+
+\begin{table}[htbp]
+\centering
+\caption{Energy cost per operation in 45\,nm technology~\cite{horowitz2014energy}.}
+\label{tab:energy-cost}
+\begin{tabular}{@{}lrr@{}}
+  \toprule
+  \textbf{Operation} & \textbf{Energy (pJ)} & \textbf{vs.\ Logic Gate} \\
+  \midrule
+  Bitwise AND/OR/XOR  & 0.1  & $1\times$ \\
+  Integer add (32-bit) & 0.9  & $9\times$ \\
+  FP multiply (32-bit) & 3.7  & $37\times$ \\
+  SRAM read            & 5.0  & $50\times$ \\
+  DRAM read            & 640  & $6{,}400\times$ \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\begin{keyinsight}
+A floating-point multiplication costs 37 times more energy than a
+bitwise logic operation~\cite{horowitz2014energy}. But moving data from main memory costs
+6,400 times more. Any architecture that keeps its model small enough
+to fit in cache---and uses logic operations instead of
+multiplication---wins on both fronts.
+\end{keyinsight}
+
+There is also a market structure argument. Training and running large
+floating-point models requires GPUs, a market dominated by a single
+manufacturer. Bitwise operations run on every CPU ever made. An
+architecture that needs only AND, OR, XOR, integer addition, and table
+lookups can run on a microcontroller, an FPGA, or a 20-year-old laptop.
+
+
+\section{The Hybrid Thesis}
+\label{sec:thesis}
+
+Our thesis is:
+
+\begin{quote}
+\itshape
+A three-stage pipeline---Tsetlin Machine feature extraction, Logic
+Gate Network composition, and Lookup Table deployment---can classify
+MNIST digits with competitive accuracy ($>$97\%) while using
+\emph{zero} floating-point operations at inference time.
+\end{quote}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  stage/.style={draw, rounded corners=5pt, minimum width=3cm,
+    minimum height=1.6cm, align=center, font=\small\sffamily,
+    line width=0.8pt},
+  arr/.style={-{Stealth[length=5pt]}, thick},
+]
+  \node[stage, fill=lightbg] (in) at (0, 0)
+    {\textbf{Input}\\$28 \times 28$ pixels};
+  \node[stage, fill=bitgreen!10, draw=bitgreen] (tm) at (4.5, 0)
+    {\textbf{Tsetlin Machine}\\Boolean clauses};
+  \node[stage, fill=bitorange!10, draw=bitorange] (lgn) at (9, 0)
+    {\textbf{Logic Gates}\\Learned circuit};
+  \node[stage, fill=bitpurple!10, draw=bitpurple] (lut) at (13.5, 0)
+    {\textbf{LUT Scoring}\\Table lookups};
+
+  \draw[arr] (in) -- (tm) node[midway, above, font=\scriptsize\sffamily]
+    {booleanise};
+  \draw[arr] (tm) -- (lgn) node[midway, above, font=\scriptsize\sffamily]
+    {clause votes};
+  \draw[arr] (lgn) -- (lut) node[midway, above, font=\scriptsize\sffamily]
+    {gate outputs};
+
+  % Training phases
+  \node[font=\scriptsize\sffamily, bitgreen] at (4.5, -1.4)
+    {Phase 1: automata};
+  \node[font=\scriptsize\sffamily, bitorange] at (9, -1.4)
+    {Phase 2: backprop};
+  \node[font=\scriptsize\sffamily, bitpurple] at (13.5, -1.4)
+    {Phase 3: compile};
+\end{tikzpicture}
+\caption{The three-stage hybrid architecture. Each stage is trained
+  separately, and each uses a different learning mechanism. At inference
+  time, the entire pipeline runs on Boolean operations, integer addition,
+  and table lookups.}
+\label{fig:hybrid-pipeline}
+\end{figure}
+
+The training happens in three phases:
+\begin{description}[leftmargin=1em]
+  \item[Phase 1 (Tsetlin):]
+    Train Boolean clauses on booleanised pixel data using Tsetlin
+    automata~\cite{tsetlin1961}. No floating-point arithmetic---only integer increment/decrement
+    and random number generation.
+  \item[Phase 2 (Logic Gates):]
+    Freeze the clauses. Train a Logic Gate Network~\cite{petersen2024difflogic} on the clause outputs
+    using gradient descent with a softmax relaxation over gate types.
+    This phase uses floating-point arithmetic during training only.
+  \item[Phase 3 (LUT Compilation):]
+    Compile any remaining continuous scoring functions into integer
+    lookup tables. This is a one-time offline step.
+\end{description}
+
+After Phase~3, the inference model contains no floating-point operations.
+
+
+\section{What the Reader Needs}
+\label{sec:prerequisites}
+
+This book assumes:
+\begin{itemize}
+  \item \textbf{Linear algebra:} Vectors, matrices, dot products. You
+    should be comfortable with $\bvec{y} = \bmat{W}\bvec{x} + \bvec{b}$.
+  \item \textbf{Basic probability:} Random variables, expected value,
+    conditional probability. You do not need measure theory.
+  \item \textbf{Logic:} AND, OR, NOT, truth tables. Chapter~2 reviews
+    this in detail.
+  \item \textbf{Programming intuition:} You should be comfortable
+    reading pseudocode. Rust experience is helpful for Chapter~14 but
+    not required.
+\end{itemize}
+
+You do \emph{not} need prior experience with machine learning,
+neural networks, or AI. Every concept is introduced from scratch.
+
+
+\section{Notation}
+\label{sec:notation}
+
+We use the following conventions throughout:
+
+\begin{table}[htbp]
+\centering
+\caption{Notation conventions used in this book.}
+\label{tab:notation}
+\begin{tabular}{@{}ll@{}}
+  \toprule
+  \textbf{Symbol} & \textbf{Meaning} \\
+  \midrule
+  $x, y, z$ & Scalars (lowercase italic) \\
+  $\bvec{x}, \bvec{w}$ & Vectors (bold lowercase) \\
+  $\bmat{W}$ & Matrices (bold uppercase) \\
+  $\{0, 1\}$ & Binary / Boolean values \\
+  $\{-1, +1\}$ & Bipolar binary values \\
+  $\bar{x}$ & Boolean complement (NOT $x$) \\
+  $\wedge, \vee$ & Logical AND, OR \\
+  $\oplus$ & Logical XOR \\
+  $|S|$ & Cardinality of set $S$ \\
+  $[n]$ & The set $\{1, 2, \ldots, n\}$ \\
+  $\popcount(\cdot)$ & Number of 1-bits in a binary word \\
+  \bottomrule
+\end{tabular}
+\end{table}

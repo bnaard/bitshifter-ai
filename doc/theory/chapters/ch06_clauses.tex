@@ -1,0 +1,754 @@
+% ============================================================================
+\chapter{Tsetlin Machine Clause Learning}
+\label{ch:clauses}
+% ============================================================================
+
+This is the core chapter of the Tsetlin Machine. It explains how
+clauses are organised into a classifier, how feedback drives learning,
+and how the entire system learns to recognise patterns. Read this
+chapter carefully---the mechanisms here are the foundation for everything
+that follows.
+
+
+% ----------------------------------------------------------------------------
+\section{Architecture Overview}
+\label{sec:tm-architecture}
+% ----------------------------------------------------------------------------
+
+A Tsetlin Machine~\cite{granmo2018tsetlin} for $K$-class classification (in our case $K = 10$
+for digits 0--9) is organised as follows:
+
+\begin{enumerate}
+  \item Each class $k \in \{0, 1, \ldots, K{-}1\}$ has $m$ clauses.
+    Half are designated \emph{positive} ($C_1^+, C_2^+, \ldots,
+    C_{m/2}^+$) and half \emph{negative} ($C_1^-, C_2^-, \ldots,
+    C_{m/2}^-$).
+  \item Each clause is a conjunctive formula (an AND of selected
+    literals), controlled by a team of Tsetlin Automata as described
+    in \cref{ch:automaton}.
+  \item The \concept{clause vote} for class $k$ is:
+    \begin{equation}
+      v_k = \sum_{j=1}^{m/2} C_j^+ - \sum_{j=1}^{m/2} C_j^-
+      \label{eq:clause-vote}
+    \end{equation}
+    Positive clauses vote \emph{for} the class; negative clauses
+    vote \emph{against}.
+  \item The predicted class is the one with the highest vote:
+    \begin{equation}
+      \hat{y} = \arg\max_k \; v_k
+      \label{eq:predict}
+    \end{equation}
+\end{enumerate}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  clause/.style={draw, rounded corners, minimum width=1.5cm,
+    minimum height=0.6cm, font=\scriptsize\sffamily, inner sep=2pt},
+  posclause/.style={clause, fill=bitblue!15},
+  negclause/.style={clause, fill=bitorange!15},
+  >=Stealth
+]
+  % Input
+  \node[font=\small\sffamily\bfseries] at (-2, 0) {Input $\bvec{x}$};
+
+  % Class 0 clauses
+  \node[font=\small\sffamily\bfseries] at (3, 2.5) {Class 0};
+  \node[posclause] (c0p1) at (1.5, 1.8) {$C_1^+$};
+  \node[posclause] (c0p2) at (3.0, 1.8) {$C_2^+$};
+  \node[negclause] (c0n1) at (4.5, 1.8) {$C_1^-$};
+  \node[negclause] (c0n2) at (6.0, 1.8) {$C_2^-$};
+
+  % Vote
+  \node[draw, circle, minimum size=0.8cm, font=\small\sffamily,
+    fill=bitgreen!10] (v0) at (8, 1.8) {$v_0$};
+
+  \draw[->, thick] (c0p1) -- (v0) node[midway, above, font=\tiny] {$+$};
+  \draw[->, thick] (c0p2) -- (v0);
+  \draw[->, thick] (c0n1) -- (v0) node[midway, below, font=\tiny] {$-$};
+  \draw[->, thick] (c0n2) -- (v0);
+
+  % Class 1 (abbreviated)
+  \node[font=\small\sffamily\bfseries] at (3, 0.3) {Class 1};
+  \node[font=\scriptsize\sffamily, bitgray] at (3.75, -0.3) {$\cdots$ (same structure)};
+  \node[draw, circle, minimum size=0.8cm, font=\small\sffamily,
+    fill=bitgreen!10] (v1) at (8, -0.3) {$v_1$};
+
+  % Dots
+  \node[font=\sffamily] at (3, -1.2) {$\vdots$};
+  \node[font=\sffamily] at (8, -1.2) {$\vdots$};
+
+  % Class 9
+  \node[font=\small\sffamily\bfseries] at (3, -2.1) {Class 9};
+  \node[font=\scriptsize\sffamily, bitgray] at (3.75, -2.7) {$\cdots$};
+  \node[draw, circle, minimum size=0.8cm, font=\small\sffamily,
+    fill=bitgreen!10] (v9) at (8, -2.7) {$v_9$};
+
+  % Argmax
+  \node[draw, rounded corners, fill=bitpurple!10, minimum width=1.5cm,
+    font=\small\sffamily\bfseries] (argmax) at (10.5, -0.3)
+    {$\arg\max$};
+  \draw[->, thick] (v0) -- (argmax);
+  \draw[->, thick] (v1) -- (argmax);
+  \draw[->, thick] (v9) -- (argmax);
+
+  \node[font=\small\sffamily\bfseries, right] at (11.5, -0.3) {$\hat{y}$};
+\end{tikzpicture}
+\caption{Tsetlin Machine architecture for 10-class classification.
+  Each class has $m$ clauses (half positive, half negative). The
+  clause vote is the sum of positive clause outputs minus negative
+  clause outputs. The predicted class is the argmax of all votes.}
+\label{fig:tm-architecture}
+\end{figure}
+
+
+% ----------------------------------------------------------------------------
+\section{Clause Evaluation}
+\label{sec:clause-eval}
+% ----------------------------------------------------------------------------
+
+Given an input $\bvec{x} \in \{0, 1\}^n$ (after booleanisation and
+literal expansion, so $n = 2 \times 784 = 1568$ for MNIST), a clause
+with included literal set $I \subseteq \{1, \ldots, n\}$ evaluates as:
+
+\begin{equation}
+  C(\bvec{x}) = \bigwedge_{k \in I} \ell_k(\bvec{x})
+  \label{eq:clause-eval}
+\end{equation}
+
+If $I = \emptyset$ (no literals included), the clause outputs 1 for
+all inputs---it is vacuously true. The training algorithm prevents
+this degenerate case through Type~I feedback (\cref{sec:type1}).
+
+\begin{engineernote}
+Clause evaluation maps directly to bitwise AND on packed bit vectors.
+For MNIST's 1568 literals, we need $\lceil 1568 / 64 \rceil = 25$
+64-bit words. The clause's ``include mask'' is also 25 words. The
+evaluation is:
+\begin{enumerate}
+  \item Bitwise AND the include mask with the literal vector.
+  \item Compare the result to the include mask.
+  \item If they are equal (all included literals are 1), the clause
+    outputs 1.
+\end{enumerate}
+This takes roughly 50 instructions regardless of how many literals
+are included.
+\end{engineernote}
+
+In practice, the evaluation is often written as:
+\begin{equation}
+  C(\bvec{x}) = \begin{cases}
+    1 & \text{if } (\bvec{m} \wedge \bvec{x}) = \bvec{m} \\
+    0 & \text{otherwise}
+  \end{cases}
+  \label{eq:clause-bitmask}
+\end{equation}
+where $\bvec{m}$ is the clause's bitmask with 1s at positions of
+included literals.
+
+
+% ----------------------------------------------------------------------------
+\section{The Voting Mechanism and Thresholding}
+\label{sec:voting}
+% ----------------------------------------------------------------------------
+
+The raw clause vote $v_k$ from \cref{eq:clause-vote} is typically
+\concept{clipped} to a threshold $T$:
+
+\begin{equation}
+  v_k^{\text{clipped}} = \max(-T, \; \min(T, \; v_k))
+  \label{eq:clipped-vote}
+\end{equation}
+
+The threshold $T$ limits how strongly any single class can dominate.
+It also plays a role in feedback: training feedback is only generated
+when $|v_k| < T$, so clauses stop being reinforced once the class
+vote is already strong enough. This prevents over-learning.
+
+\begin{keyinsight}
+The threshold $T$ controls the number of clauses that actively
+participate in learning. If $v_k$ already exceeds $T$, additional
+positive clauses are not reinforced---this frees up ``training
+capacity'' for other patterns. Think of it as a budget: each class
+can spend at most $T$ votes of confidence, encouraging diverse
+clause patterns rather than redundant ones.
+\end{keyinsight}
+
+
+% ----------------------------------------------------------------------------
+\section{The Feedback Mechanism}
+\label{sec:feedback}
+% ----------------------------------------------------------------------------
+
+Training a Tsetlin Machine means adjusting the states of all the
+automata so that clauses learn to detect useful patterns. The feedback
+mechanism is the heart of the algorithm. It comes in two types.
+
+Given a training example $(\bvec{x}, y)$ where $y$ is the true class:
+
+\begin{description}[leftmargin=1em]
+  \item[Type~I feedback] is given to clauses of the \textbf{correct
+    class} $y$. Its purpose is to make these clauses \emph{more
+    specific}---to include more literals that match the current input
+    and exclude literals that do not.
+
+  \item[Type~II feedback] is given to clauses of an
+    \textbf{incorrect class} $k \neq y$ (specifically, the class
+    with the highest or a randomly chosen high vote). Its purpose is
+    to make these clauses \emph{less matching}---to push them away
+    from recognising the current input.
+\end{description}
+
+
+% ----------------------------------------------------------------------------
+\section{Type~I Feedback: Reinforcing the Correct Class}
+\label{sec:type1}
+% ----------------------------------------------------------------------------
+
+Type~I feedback is given to clauses belonging to the true class $y$.
+It operates differently on positive and negative clauses, and
+differently depending on whether the clause matched the current input.
+
+\subsection{Type~I on Positive Clauses ($C^+$)}
+
+The goal is to strengthen positive clauses that match patterns from
+class $y$.
+
+\paragraph{Case 1: The clause output is 1 (clause matches the input).}
+
+For each literal $\ell_k$ in the clause:
+\begin{itemize}
+  \item If $\ell_k = 1$ (the literal is true in this input) and the
+    automaton says ``include'': \textbf{reward} the automaton with
+    probability $\frac{s-1}{s}$. This reinforces the inclusion of
+    matching literals.
+  \item If $\ell_k = 0$ (the literal is false in this input) and the
+    automaton says ``include'': this means the clause includes a
+    literal that is currently 0, but the clause still output 1. This
+    cannot actually happen (the clause is an AND of included
+    literals, so all included literals must be 1 for the clause to
+    output 1). So this case is impossible.
+  \item If $\ell_k = 1$ and the automaton says ``exclude'':
+    \textbf{penalty} the automaton with probability $\frac{s-1}{s}$.
+    This pushes excluded-but-true literals toward inclusion,
+    making the clause more specific.
+  \item If $\ell_k = 0$ and the automaton says ``exclude'':
+    \textbf{reward} the automaton with probability $\frac{1}{s}$.
+    This gently reinforces the exclusion of currently-false literals.
+\end{itemize}
+
+\paragraph{Case 2: The clause output is 0 (clause does not match the input).}
+
+For each literal:
+\begin{itemize}
+  \item If the automaton says ``include'': \textbf{penalty} with
+    probability $\frac{1}{s}$. This gently pushes included literals
+    toward exclusion, making the clause less specific (so it might
+    match more inputs in the future).
+  \item If the automaton says ``exclude'': \textbf{reward} with
+    probability $\frac{1}{s}$. This gently reinforces exclusion.
+\end{itemize}
+
+\begin{engineernote}
+Notice the asymmetry: when the clause matches ($C = 1$), feedback is
+applied with high probability $\frac{s-1}{s}$. When the clause does
+not match ($C = 0$), feedback uses the low probability $\frac{1}{s}$.
+This means matching clauses are strongly reinforced while non-matching
+clauses drift slowly. The specificity parameter $s$ controls this
+ratio.
+\end{engineernote}
+
+\subsection{Type~I on Negative Clauses ($C^-$)}
+
+Negative clauses vote \emph{against} the class. For the true class
+$y$, we want negative clauses to \emph{not match}. So Type~I feedback
+on negative clauses is the mirror image: it tries to push them away
+from the current input pattern.
+
+In practice, Type~I feedback on negative clauses for the true class
+is either omitted or applies only the ``clause output is 0'' case
+(gently reinforcing exclusion). The key training signal for negative
+clauses comes from Type~II feedback on incorrect classes.
+
+
+% ----------------------------------------------------------------------------
+\section{Type~II Feedback: Weakening Incorrect Classes}
+\label{sec:type2}
+% ----------------------------------------------------------------------------
+
+Type~II feedback targets clauses of an \textbf{incorrect} class
+$k \neq y$ that have high votes for the current input. The goal is to
+break these clauses so they stop matching.
+
+\paragraph{When does Type~II apply?}
+For a positive clause $C^+$ of class $k \neq y$ that outputs~1 (it
+wrongly matches the input):
+
+For each literal $\ell_k$ that is \textbf{included} in the clause:
+\begin{itemize}
+  \item If $\ell_k = 0$ (the literal is false in this input): this
+    cannot happen (clause output is 1, so all included literals are
+    true).
+  \item If $\ell_k = 1$ (the literal is true): \textbf{penalty} the
+    automaton, pushing it from ``include'' toward ``exclude.''
+\end{itemize}
+
+For each literal that is \textbf{excluded}:
+\begin{itemize}
+  \item If $\ell_k = 0$ (the literal is false): \textbf{reward} the
+    automaton (reinforcing exclusion of this false literal---if it
+    were included, it would break the clause, which is what we want,
+    but we also want the automaton to ``remember'' this exclusion).
+\end{itemize}
+
+\begin{keyinsight}
+Type~II feedback has a specific and elegant effect: it tries to
+include literals that are 0 in the current input. If it succeeds in
+including even one such literal, the clause will output 0 for this
+input (because the AND of a 0 is 0), breaking the false match. This
+is a \emph{targeted sabotage}: instead of destroying the entire
+clause, Type~II just adds one ``poison pill'' literal that prevents
+the clause from matching this particular wrong input.
+\end{keyinsight}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  >=Stealth,
+  box/.style={draw, rounded corners, minimum width=3cm, minimum height=1cm,
+    font=\small\sffamily, align=center}
+]
+  % Type I
+  \node[box, fill=bitblue!10] (t1) at (0, 0)
+    {\textbf{Type~I Feedback}\\Correct class $y$};
+  \node[font=\scriptsize\sffamily, text width=4cm, align=center]
+    at (0, -1.5)
+    {Strengthen matching clauses\\Include true literals\\Exclude false literals};
+
+  % Type II
+  \node[box, fill=bitorange!10] (t2) at (7, 0)
+    {\textbf{Type~II Feedback}\\Incorrect class $k \neq y$};
+  \node[font=\scriptsize\sffamily, text width=4cm, align=center]
+    at (7, -1.5)
+    {Break wrongly matching clauses\\Include a false literal\\to sabotage the clause};
+
+  % Arrows
+  \draw[->, thick, bitblue] (-2, 1.5) -- (t1)
+    node[midway, left, font=\scriptsize\sffamily] {train example};
+  \draw[->, thick, bitorange] (9, 1.5) -- (t2)
+    node[midway, right, font=\scriptsize\sffamily] {train example};
+\end{tikzpicture}
+\caption{The two types of feedback. Type~I reinforces clauses of the
+  correct class, making them more specific. Type~II sabotages clauses
+  of incorrect classes that wrongly matched the input.}
+\label{fig:feedback-types}
+\end{figure}
+
+
+% ----------------------------------------------------------------------------
+\section{The Complete Feedback Tables}
+\label{sec:feedback-tables}
+% ----------------------------------------------------------------------------
+
+For reference, we present the complete feedback rules in tabular form.
+Let $C$ be the clause output, $\ell$ the literal value in the current
+input, and $a$ the automaton action (0 = exclude, 1 = include).
+
+\subsection{Type~I Feedback (Positive Clause, True Class)}
+
+\begin{table}[htbp]
+\centering
+\caption{Type~I feedback for a positive clause of the true class.
+  ``$\nearrow$'' means reward (push away from boundary);
+  ``$\searrow$'' means penalty (push toward boundary);
+  ``---'' means no feedback. Probabilities are shown in parentheses.}
+\label{tab:type1-pos}
+\begin{tabular}{@{}ccc|l@{}}
+  \toprule
+  $C$ & $\ell$ & $a$ & Feedback \\
+  \midrule
+  1 & 1 & 1 (include) & $\nearrow$ Reward with prob.\ $\frac{s-1}{s}$ \\
+  1 & 1 & 0 (exclude) & $\searrow$ Penalty with prob.\ $\frac{s-1}{s}$ \\
+  1 & 0 & 1 (include) & impossible ($C = 1$ requires all included $\ell = 1$) \\
+  1 & 0 & 0 (exclude) & $\nearrow$ Reward with prob.\ $\frac{1}{s}$ \\
+  \midrule
+  0 & 1 & 1 (include) & $\searrow$ Penalty with prob.\ $\frac{1}{s}$ \\
+  0 & 1 & 0 (exclude) & $\nearrow$ Reward with prob.\ $\frac{1}{s}$ \\
+  0 & 0 & 1 (include) & $\searrow$ Penalty with prob.\ $\frac{1}{s}$ \\
+  0 & 0 & 0 (exclude) & $\nearrow$ Reward with prob.\ $\frac{1}{s}$ \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Type~II Feedback (Positive Clause, Wrong Class)}
+
+\begin{table}[htbp]
+\centering
+\caption{Type~II feedback for a positive clause of an incorrect class.
+  Only clauses with $C = 1$ receive Type~II feedback.}
+\label{tab:type2-pos}
+\begin{tabular}{@{}ccc|l@{}}
+  \toprule
+  $C$ & $\ell$ & $a$ & Feedback \\
+  \midrule
+  1 & 1 & 1 (include) & --- (no action) \\
+  1 & 1 & 0 (exclude) & $\searrow$ Penalty (push toward include) \\
+  1 & 0 & 1 (include) & impossible \\
+  1 & 0 & 0 (exclude) & $\searrow$ Penalty (push toward include) \\
+  \midrule
+  0 & \multicolumn{2}{c|}{any} & --- (no feedback) \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\begin{engineernote}
+The tables above describe the most common formulation
+from~\cite{granmo2018tsetlin}. Variants exist: some
+implementations apply Type~II feedback deterministically (probability
+1), others use $\frac{1}{s}$. The variant matters less than the
+principle: Type~I builds, Type~II sabotages.
+\end{engineernote}
+
+
+% ----------------------------------------------------------------------------
+\section{Putting It All Together: One Training Step}
+\label{sec:training-step}
+% ----------------------------------------------------------------------------
+
+\begin{algorithm}[htbp]
+\caption{One training step of the Tsetlin Machine.}
+\label{alg:tm-train}
+\begin{algorithmic}[1]
+  \State \textbf{Input:} Training example $(\bvec{x}, y)$, threshold $T$,
+    specificity $s$
+  \State Booleanise input: $\bvec{x}_{\text{bool}} \leftarrow
+    \text{threshold\_and\_expand}(\bvec{x})$
+  \For{each class $k = 0, 1, \ldots, K{-}1$}
+    \State Evaluate all clauses: compute $C_j^+(\bvec{x}_{\text{bool}})$
+      and $C_j^-(\bvec{x}_{\text{bool}})$
+    \State Compute vote: $v_k \leftarrow \sum C_j^+ - \sum C_j^-$
+    \State Clip: $v_k \leftarrow \text{clamp}(v_k, -T, T)$
+  \EndFor
+  \Statex
+  \For{each class $k = 0, 1, \ldots, K{-}1$}
+    \If{$k = y$} \Comment{True class}
+      \State Apply Type~I feedback to clauses of class $k$
+      \Statex \quad\quad with probability $\frac{T - v_k}{2T}$
+    \Else \Comment{Wrong class}
+      \State Apply Type~II feedback to clauses of class $k$
+      \Statex \quad\quad with probability $\frac{T + v_k}{2T}$
+    \EndIf
+  \EndFor
+\end{algorithmic}
+\end{algorithm}
+
+The probabilities on lines 10 and 13 deserve attention:
+
+\begin{itemize}
+  \item For the true class $y$: feedback probability is
+    $\frac{T - v_y}{2T}$. When $v_y$ is low (the correct class is
+    losing), this probability is high---urgent reinforcement. When
+    $v_y \approx T$ (the correct class is winning strongly), the
+    probability drops to near zero---no need to train further.
+
+  \item For wrong classes $k \neq y$: feedback probability is
+    $\frac{T + v_k}{2T}$. When $v_k$ is high (the wrong class is
+    winning), the probability is high---urgent correction. When
+    $v_k$ is low or negative, the probability drops.
+\end{itemize}
+
+\begin{keyinsight}
+The voting margin directly controls the training intensity. Clauses
+that are already doing well receive little feedback; clauses that are
+struggling receive intense feedback. This is an automatic form of
+\emph{hard example mining}---the system focuses its learning effort
+where it is most needed.
+\end{keyinsight}
+
+
+% ----------------------------------------------------------------------------
+\section{Worked Example: Learning a Simple Pattern}
+\label{sec:worked-example}
+% ----------------------------------------------------------------------------
+
+Let us trace the training of a single positive clause for class~``1''
+on a tiny 4-pixel image. We use $N = 3$ states per action (6 states
+total per automaton) and $s = 3.0$.
+
+\subsection{Setup}
+
+The input has 4 pixels, giving 8 literals after expansion:
+$x_1, \bar{x}_1, x_2, \bar{x}_2, x_3, \bar{x}_3, x_4, \bar{x}_4$.
+
+We assign one automaton to each literal, all starting in state~4
+(just above the boundary, action = include). So initially the clause
+includes all 8 literals: $C = x_1 \wedge \bar{x}_1 \wedge \cdots$,
+which always outputs 0 (since $x_k \wedge \bar{x}_k = 0$).
+
+\begin{center}
+\begin{tabular}{@{}l*{8}{c}@{}}
+  \toprule
+  \textbf{Literal} & $x_1$ & $\bar{x}_1$ & $x_2$ & $\bar{x}_2$ &
+    $x_3$ & $\bar{x}_3$ & $x_4$ & $\bar{x}_4$ \\
+  \midrule
+  Initial state & 4 & 4 & 4 & 4 & 4 & 4 & 4 & 4 \\
+  Action & inc & inc & inc & inc & inc & inc & inc & inc \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Training Example 1}
+
+Input: image of ``1'' with pixels $(1, 0, 1, 0)$, so:
+\[
+  (x_1, \bar{x}_1, x_2, \bar{x}_2, x_3, \bar{x}_3, x_4, \bar{x}_4)
+  = (1, 0, 0, 1, 1, 0, 0, 1)
+\]
+
+The clause output is 0 (since many included literals are 0). Since
+$C = 0$ and this is a positive clause for the true class, Type~I
+feedback applies with the ``clause output = 0'' rules.
+
+Each automaton receives a penalty with probability $\frac{1}{s} =
+\frac{1}{3} \approx 0.33$. Suppose random draws penalise automata
+for $\bar{x}_1$, $x_2$, $\bar{x}_3$, and $x_4$. These automata
+move from state~4 to state~3 (crossing the boundary from include to
+exclude):
+
+\begin{center}
+\begin{tabular}{@{}l*{8}{c}@{}}
+  \toprule
+  \textbf{Literal} & $x_1$ & $\bar{x}_1$ & $x_2$ & $\bar{x}_2$ &
+    $x_3$ & $\bar{x}_3$ & $x_4$ & $\bar{x}_4$ \\
+  \midrule
+  State & 4 & \textbf{3} & \textbf{3} & 4 & 4 & \textbf{3} & \textbf{3} & 4 \\
+  Action & inc & \textbf{exc} & \textbf{exc} & inc & inc & \textbf{exc} & \textbf{exc} & inc \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+Now the clause is $C = x_1 \wedge \bar{x}_2 \wedge x_3 \wedge
+\bar{x}_4$. Let us check: for the input $(1, 0, 1, 0)$, the literal
+values at included positions are $x_1 = 1$, $\bar{x}_2 = 1$,
+$x_3 = 1$, $\bar{x}_4 = 1$. All are 1, so $C = 1$. The clause
+now matches this ``1'' pattern.
+
+\subsection{Training Example 2}
+
+Input: image of ``0'' with pixels $(1, 1, 1, 1)$, so all positive
+literals are 1 and all negated literals are 0. The clause evaluates:
+$x_1 = 1$, $\bar{x}_2 = 0$---stop, $C = 0$. Good: the clause does
+not match this ``0'' image.
+
+But now suppose another ``0'' image arrives with pixels $(1, 0, 1, 1)$:
+$x_1 = 1$, $\bar{x}_2 = 1$, $x_3 = 1$, $\bar{x}_4 = 0$---stop,
+$C = 0$. Still correct.
+
+And a ``1'' image with pixels $(1, 0, 0, 0)$:
+$x_1 = 1$, $\bar{x}_2 = 1$, $x_3 = 0$---stop, $C = 0$. This ``1''
+pattern does not match because $x_3 = 0$. This clause has learned a
+\emph{specific} pattern for ``1'' that requires both $x_1$ and $x_3$
+to be bright.
+
+\subsection{Continuing Training}
+
+Over many examples, Type~I feedback will:
+\begin{itemize}
+  \item Strongly reinforce included literals that are consistently
+    true for class ``1'' images (pushing automata toward state~6).
+  \item Gently push excluded literals further into exclusion (toward
+    state~1).
+\end{itemize}
+
+If a Type~II signal arrives (because this clause wrongly matches an
+image from another class), it will try to include a literal that is
+0 in that image, preventing the false match.
+
+
+% ----------------------------------------------------------------------------
+\section{The Role of Multiple Clauses}
+\label{sec:multiple-clauses}
+% ----------------------------------------------------------------------------
+
+A single clause can only detect one specific pattern. The digit ``3''
+can be written in many ways---some with a flat top, some with a
+rounded top, some thick, some thin. No single conjunctive clause can
+match all variants.
+
+This is why each class has $m$ clauses (typically $m = 100$ to
+$2000$). Each clause specialises in a different sub-pattern:
+
+\begin{itemize}
+  \item Clause~1 might detect ``3'' with a flat top bar.
+  \item Clause~2 might detect ``3'' with a rounded top.
+  \item Clause~3 might detect a common stroke in the middle.
+  \item And so on.
+\end{itemize}
+
+The vote aggregation (sum of clause outputs) acts as a soft OR: if
+\emph{any} clause matches, the vote for class ``3'' increases.
+
+\begin{analogy}
+Imagine a committee of experts, each looking at a different aspect of
+the digit. Expert~1 checks if the top stroke looks right. Expert~2
+checks the middle junction. Expert~3 checks the bottom curve. They
+vote, and the digit is classified based on the majority opinion. The
+Tsetlin Machine learns both the experts' criteria (which pixels to
+check) and which experts to trust (positive vs.\ negative polarity).
+\end{analogy}
+
+
+% ----------------------------------------------------------------------------
+\section{Negative Clauses: Learning What a Digit Is Not}
+\label{sec:negative-clauses}
+% ----------------------------------------------------------------------------
+
+Negative clauses vote \emph{against} their class. A negative clause
+for class ``3'' might detect patterns that look like ``8'' (which is
+similar to ``3'' but has a closed top loop). When this pattern is
+present, the negative clause fires and reduces the vote for ``3,''
+making it less likely to be confused with ``8.''
+
+\begin{example}
+Suppose class ``7'' has:
+\begin{itemize}
+  \item A positive clause that fires when there is a horizontal top
+    stroke and a diagonal down stroke.
+  \item A negative clause that fires when there is also a horizontal
+    middle stroke (suggesting ``1'' written with a crossbar, or
+    some styles of ``4'').
+\end{itemize}
+The positive clause says ``this might be a 7'' and the negative clause
+says ``but this feature argues against 7.'' The vote is the net
+effect.
+\end{example}
+
+
+% ----------------------------------------------------------------------------
+\section{Hyperparameters and Their Effects}
+\label{sec:hyperparams}
+% ----------------------------------------------------------------------------
+
+The Tsetlin Machine has remarkably few hyperparameters:
+
+\begin{table}[htbp]
+\centering
+\caption{Tsetlin Machine hyperparameters.}
+\label{tab:tm-hyperparams}
+\begin{tabular}{@{}llp{6cm}@{}}
+  \toprule
+  \textbf{Symbol} & \textbf{Typical range} & \textbf{Effect} \\
+  \midrule
+  $m$ & 100--2000 & Number of clauses per class. More clauses
+    $\Rightarrow$ more capacity to learn diverse patterns, but
+    slower training and inference. \\
+  $T$ & 10--100 & Vote threshold. Controls how many clauses
+    actively train. Lower $T$ $\Rightarrow$ fewer active clauses,
+    faster convergence but potentially lower accuracy. \\
+  $s$ & 2.0--10.0 & Specificity. Higher $s$ $\Rightarrow$ more
+    specific clauses (more included literals). Lower $s$ $\Rightarrow$
+    more general clauses. \\
+  $N$ & 50--200 & States per action in each automaton. Higher $N$
+    $\Rightarrow$ more noise resistance, slower adaptation. \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\begin{engineernote}
+A good starting configuration for MNIST with simple thresholding:
+$m = 500$ clauses per class (250 positive, 250 negative), $T = 50$,
+$s = 5.0$, $N = 100$. This achieves approximately 96--97\% test
+accuracy and trains in under a minute on a modern CPU.
+\end{engineernote}
+
+
+% ----------------------------------------------------------------------------
+\section{Why Stochastic Feedback Creates Diversity}
+\label{sec:diversity}
+% ----------------------------------------------------------------------------
+
+A crucial question: if all clauses for class ``3'' receive the same
+training examples, why do they learn different patterns?
+
+The answer is the stochastic feedback. Each automaton independently
+receives or does not receive a reward/penalty based on random number
+generation. This means:
+
+\begin{enumerate}
+  \item Two clauses seeing the same input receive different feedback
+    on different literals.
+  \item Over time, random variations cause clauses to diverge: one
+    clause might include $x_{42}$ while another excludes it, leading
+    them to specialise on different sub-patterns.
+  \item The vote threshold $T$ amplifies this effect: once enough
+    clauses are matching, others stop receiving feedback and are free
+    to explore alternative patterns.
+\end{enumerate}
+
+\begin{keyinsight}
+Diversity in the Tsetlin Machine is not engineered---it is an emergent
+property of stochastic feedback combined with vote thresholding. Each
+clause follows its own random walk through literal space, and the
+aggregate system self-organises into a diverse committee of pattern
+detectors.
+\end{keyinsight}
+
+
+% ----------------------------------------------------------------------------
+\section{Comparison with Gradient-Based Learning}
+\label{sec:tm-vs-gradient}
+% ----------------------------------------------------------------------------
+
+It is instructive to compare the Tsetlin Machine training loop with
+standard gradient descent:
+
+\begin{table}[htbp]
+\centering
+\caption{Tsetlin Machine vs.\ gradient descent.}
+\label{tab:tm-vs-gd}
+\begin{tabular}{@{}lll@{}}
+  \toprule
+  \textbf{Aspect} & \textbf{Gradient descent} & \textbf{Tsetlin Machine} \\
+  \midrule
+  Parameter type & Floating-point weights & Integer automaton states \\
+  Update rule & $w \leftarrow w - \eta \nabla$ & $s \leftarrow s \pm 1$ \\
+  Requires & Differentiable ops & Any reward/penalty signal \\
+  Arithmetic & FP multiply-add & Integer increment/decrement \\
+  Hyperparams & Learning rate, optimiser, & $s$, $T$, $m$, $N$ \\
+   & momentum, weight decay & \\
+  Memory & 32 bits per weight & $\lceil \log_2(2N) \rceil$ bits per automaton \\
+  Interpretability & Opaque weight matrices & Readable Boolean clauses \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+The Tsetlin Machine's main advantages are simplicity, interpretability,
+and integer-only arithmetic~\cite{wheeldon2020pervasive}. Its main disadvantage is slower convergence
+on complex tasks~\cite{zhang2021convergence}, which is partly why we combine it with a Logic Gate
+Network~\cite{petersen2022difflogic} in the hybrid architecture.
+
+
+% ----------------------------------------------------------------------------
+\section{Summary}
+\label{sec:ch6-summary}
+% ----------------------------------------------------------------------------
+
+The Tsetlin Machine training algorithm can be summarised in four
+principles:
+
+\begin{enumerate}
+  \item \textbf{Type~I reinforces:} For the correct class, strengthen
+    clauses that match the input by rewarding included-and-true
+    literals and penalising excluded-but-true ones.
+  \item \textbf{Type~II sabotages:} For incorrect classes, break
+    wrongly-matching clauses by including literals that are false
+    in the current input.
+  \item \textbf{Stochastic diversity:} Random feedback probabilities
+    ensure different clauses learn different patterns.
+  \item \textbf{Vote thresholding:} The threshold $T$ balances
+    training effort across clauses, preventing any single pattern
+    from monopolising the vote.
+\end{enumerate}
+
+The next chapter applies these principles to MNIST and walks through
+the training process on real digit images.

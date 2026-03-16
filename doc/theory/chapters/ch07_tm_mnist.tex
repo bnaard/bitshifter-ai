@@ -1,0 +1,389 @@
+% ============================================================================
+\chapter{Tsetlin Machines on MNIST}
+\label{ch:tm-mnist}
+% ============================================================================
+
+This chapter applies the Tsetlin Machine~\cite{granmo2018tsetlin} to MNIST~\cite{lecun1998mnist} digit recognition.
+We walk through the complete pipeline from raw pixels to classification,
+examine what the learned clauses look like, and discuss the performance
+and accuracy one can expect.
+
+
+% ----------------------------------------------------------------------------
+\section{The End-to-End Pipeline}
+\label{sec:tm-pipeline}
+% ----------------------------------------------------------------------------
+
+The complete inference pipeline for a single image:
+
+\begin{enumerate}
+  \item \textbf{Load image:} Read the $28 \times 28$ pixel values
+    $p_1, \ldots, p_{784} \in [0, 255]$.
+  \item \textbf{Booleanise:} Apply threshold at $\theta = 127$:
+    $x_k = \mathbf{1}[p_k > 127]$.
+  \item \textbf{Expand literals:} Create
+    $\bvec{x}_{\text{exp}} = (x_1, \bar{x}_1, \ldots, x_{784},
+    \bar{x}_{784}) \in \{0,1\}^{1568}$.
+  \item \textbf{Evaluate clauses:} For each class $k$ and each
+    clause $C_j^+, C_j^-$, compute $C(\bvec{x}_{\text{exp}})$ using
+    bitwise AND.
+  \item \textbf{Sum votes:} $v_k = \sum C_j^+ - \sum C_j^-$, clipped
+    to $[-T, T]$.
+  \item \textbf{Classify:} $\hat{y} = \arg\max_k \, v_k$.
+\end{enumerate}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  box/.style={draw, rounded corners, minimum width=2.2cm,
+    minimum height=1cm, font=\small\sffamily, align=center,
+    line width=0.6pt},
+  arr/.style={-{Stealth[length=4pt]}, thick},
+]
+  \node[box, fill=bitgray!10] (img) at (0, 0) {$28 \times 28$\\pixels};
+  \node[box, fill=bitorange!10] (bool) at (3.5, 0) {Booleanise\\$\theta = 127$};
+  \node[box, fill=bitorange!10] (exp) at (7, 0) {Expand\\literals};
+  \node[box, fill=bitblue!10] (eval) at (10.5, 0) {Evaluate\\clauses};
+  \node[box, fill=bitgreen!10] (vote) at (14, 0) {Vote\\$\arg\max$};
+
+  \draw[arr] (img) -- (bool);
+  \draw[arr] (bool) -- (exp) node[midway, above, font=\tiny\sffamily] {784 bits};
+  \draw[arr] (exp) -- (eval) node[midway, above, font=\tiny\sffamily] {1568 bits};
+  \draw[arr] (eval) -- (vote);
+
+  \node[font=\small\sffamily\bfseries, right] at (15.5, 0) {digit};
+\end{tikzpicture}
+\caption{The Tsetlin Machine inference pipeline for MNIST.}
+\label{fig:tm-pipeline}
+\end{figure}
+
+
+% ----------------------------------------------------------------------------
+\section{Computational Cost Analysis}
+\label{sec:tm-cost}
+% ----------------------------------------------------------------------------
+
+Let us count the operations for a single image classification with
+$m = 500$ clauses per class and 10 classes.
+
+\paragraph{Booleanisation and expansion.}
+784 comparisons (threshold) plus 784 NOT operations (negation).
+Total: roughly 1,568 operations, or 25 64-bit word operations using
+bitwise parallel NOT.
+
+\paragraph{Clause evaluation.}
+Each clause requires $\lceil 1568 / 64 \rceil = 25$ AND operations
+plus a comparison of 25 words. Approximately 50 operations per clause.
+
+With $500 \times 10 = 5{,}000$ total clauses:
+$5{,}000 \times 50 = 250{,}000$ bitwise operations.
+
+\paragraph{Vote summation.}
+$5{,}000$ additions plus 10 argmax comparisons. Trivial.
+
+\begin{engineernote}
+The total inference cost is dominated by clause evaluation: about
+250,000 bitwise operations. Compare this to a conventional two-layer
+network with 784 inputs, 300 hidden neurons, and 10 outputs:
+$(784 \times 300 + 300 \times 10) = 238{,}200$ floating-point
+multiply-accumulates. The operation counts are similar, but each
+Tsetlin operation is a bitwise AND (0.1~pJ) versus a floating-point
+MAC (roughly 4~pJ)~\cite{horowitz2014energy}, giving a roughly 40$\times$ energy advantage per
+operation.
+\end{engineernote}
+
+
+% ----------------------------------------------------------------------------
+\section{What Do Learned Clauses Look Like?}
+\label{sec:learned-clauses}
+% ----------------------------------------------------------------------------
+
+After training, each clause is a conjunction of selected literals.
+We can visualise a clause by highlighting which pixel positions
+are included:
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[scale=0.14]
+  % Grid for clause visualization
+  \fill[bitgray!5] (0,0) rectangle (28,28);
+  \draw[bitgray!15, very thin, step=1] (0,0) grid (28,28);
+
+  % Positive literals (pixel must be bright) - shown in blue
+  % Representing a typical clause for digit "7"
+  \foreach \x/\y in {
+    8/24, 9/24, 10/24, 11/24, 12/24, 13/24, 14/24, 15/24,
+    16/24, 17/24, 18/24, 19/24,
+    18/23, 19/23,
+    17/22,
+    16/21,
+    15/20,
+    14/19, 15/19,
+    13/17, 14/17,
+    13/16
+  }{
+    \fill[bitblue!50] (\x,\y) rectangle ++(1,1);
+  }
+
+  % Negative literals (pixel must be dark) - shown in orange
+  \foreach \x/\y in {
+    5/24, 6/24, 7/24,
+    20/24, 21/24, 22/24,
+    5/20, 6/20, 7/20,
+    5/16, 6/16, 7/16,
+    5/12, 6/12, 7/12,
+    20/12, 21/12, 22/12
+  }{
+    \fill[bitorange!30] (\x,\y) rectangle ++(1,1);
+  }
+
+  % Legend
+  \node[font=\small\sffamily] at (14, -2)
+    {\textcolor{bitblue}{Blue}: $x_k$ included (pixel must be bright)};
+  \node[font=\small\sffamily] at (14, -3.5)
+    {\textcolor{bitorange}{Orange}: $\bar{x}_k$ included (pixel must be dark)};
+\end{tikzpicture}
+\caption{Visualisation of a learned clause for digit ``7.'' Blue pixels
+  must be bright (the clause includes $x_k$); orange pixels must be
+  dark (the clause includes $\bar{x}_k$). Unshaded pixels are excluded
+  and can be anything. The clause detects a horizontal top bar with a
+  diagonal downstroke, while requiring the left and lower-right regions
+  to be empty.}
+\label{fig:clause-vis}
+\end{figure}
+
+Key observations about learned clauses:
+\begin{itemize}
+  \item Clauses typically include 20--80 literals (out of 1568
+    available). They are specific enough to detect a pattern but
+    general enough to match variations.
+  \item Positive literals ($x_k$) mark pixels that must be bright
+    (ink). They trace the expected stroke positions.
+  \item Negative literals ($\bar{x}_k$) mark pixels that must be
+    dark (background). They ensure the surrounding area is empty,
+    distinguishing similar digits.
+  \item The excluded literals (no constraint) handle the natural
+    variation in handwriting---the clause does not care about pixels
+    that vary across examples of the same digit.
+\end{itemize}
+
+\begin{keyinsight}
+Tsetlin Machine clauses are inherently interpretable. Each clause
+is a human-readable rule: ``if these pixels are bright AND those
+pixels are dark, then this might be digit~$k$.'' No post-hoc
+explanation method is needed---the model \emph{is} the explanation.
+This is a significant advantage for debugging, auditing, and
+understanding what the model has learned.
+\end{keyinsight}
+
+
+% ----------------------------------------------------------------------------
+\section{Training Dynamics}
+\label{sec:training-dynamics}
+% ----------------------------------------------------------------------------
+
+Training a Tsetlin Machine on MNIST typically proceeds as follows:
+
+\paragraph{Epoch 1--2.} Clauses are mostly random. Many include
+contradictory literal pairs ($x_k$ and $\bar{x}_k$), so they always
+output~0. Test accuracy is around 60--70\%.
+
+\paragraph{Epoch 3--5.} Type~I feedback begins to resolve
+contradictions. Clauses start specialising on common patterns (e.g.,
+the straight vertical stroke of ``1,'' the closed loop of ``0'').
+Test accuracy reaches 85--90\%.
+
+\paragraph{Epoch 5--15.} Clauses refine. Some become very specific
+(many literals) and match rare handwriting styles. Others remain
+general and match common patterns. Test accuracy reaches 93--96\%.
+
+\paragraph{Epoch 15--50.} Marginal gains. The system learns to
+distinguish confusable pairs like (3, 8), (4, 9), and (5, 6).
+Test accuracy plateaus at 96--97\% (with simple thresholding)~\cite{abeyrathna2021integer}.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth]
+  \begin{axis}[
+    width=10cm, height=6cm,
+    xlabel={Epoch}, ylabel={Test accuracy (\%)},
+    xmin=0, xmax=50, ymin=50, ymax=100,
+    grid=major,
+    grid style={bitgray!20},
+    every axis label/.style={font=\small\sffamily},
+    tick label style={font=\small},
+    legend pos=south east,
+    legend style={font=\small\sffamily}
+  ]
+    % Typical learning curve
+    \addplot[thick, bitblue, smooth] coordinates {
+      (1, 65) (2, 78) (3, 85) (5, 90) (8, 93)
+      (10, 94.5) (15, 95.5) (20, 96.2) (30, 96.7)
+      (40, 96.9) (50, 97.0)
+    };
+    \addlegendentry{$m=500$, $s=5.0$}
+
+    % More clauses
+    \addplot[thick, bitgreen, smooth, dashed] coordinates {
+      (1, 68) (2, 82) (3, 88) (5, 92) (8, 94.5)
+      (10, 95.5) (15, 96.5) (20, 97.0) (30, 97.3)
+      (40, 97.5) (50, 97.6)
+    };
+    \addlegendentry{$m=2000$, $s=5.0$}
+  \end{axis}
+\end{tikzpicture}
+\caption{Typical training curves for a Tsetlin Machine on MNIST with
+  simple thresholding ($\theta = 127$). More clauses give higher
+  accuracy but slower training. The curve shows rapid initial
+  improvement followed by gradual refinement.}
+\label{fig:training-curve}
+\end{figure}
+
+
+% ----------------------------------------------------------------------------
+\section{Accuracy Results and Comparison}
+\label{sec:tm-accuracy}
+% ----------------------------------------------------------------------------
+
+Published results for Tsetlin Machines on
+MNIST~\cite{granmo2018tsetlin, abeyrathna2021integer}:
+
+\begin{table}[htbp]
+\centering
+\caption{Tsetlin Machine accuracy on MNIST under different
+  configurations.}
+\label{tab:tm-accuracy}
+\begin{tabular}{@{}llcr@{}}
+  \toprule
+  \textbf{Configuration} & \textbf{Encoding} & \textbf{Clauses/class}
+    & \textbf{Test accuracy} \\
+  \midrule
+  Baseline TM & Threshold ($\theta=127$) & 500 & 96.5\% \\
+  Large TM & Threshold ($\theta=127$) & 2000 & 97.2\% \\
+  Thermometer TM & Thermometer ($L=8$) & 2000 & 98.2\% \\
+  Weighted TM~\cite{phoulady2020weighted}
+    & Thermometer ($L=8$) & 2000 & 98.6\% \\
+  Convolutional TM~\cite{granmo2019convtm}
+    & Patches & 8000 & 99.35\% \\
+  \midrule
+  2-layer FP network & Continuous & --- & 98.0\% \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+The baseline Tsetlin Machine with simple thresholding achieves
+96--97\%, which is 1--2\% below a standard floating-point network.
+With thermometer encoding and more clauses, it matches or exceeds
+the FP baseline. The convolutional variant~\cite{granmo2019convtm} reaches 99.35\%, which
+is competitive with CNNs.
+
+\begin{engineernote}
+For our hybrid architecture, we target the baseline TM configuration
+(simple thresholding, 500 clauses/class). This gives 96--97\%
+accuracy from the Tsetlin stage alone. The Logic Gate Network and
+LUT stages will then refine this further, aiming for $>$97\% total.
+\end{engineernote}
+
+
+% ----------------------------------------------------------------------------
+\section{Memory Footprint}
+\label{sec:tm-memory}
+% ----------------------------------------------------------------------------
+
+Each clause stores a bitmask of 1568~bits (which literals are
+included). With 500 clauses per class and 10 classes:
+
+\begin{equation}
+  \text{Model size} = 10 \times 500 \times 1568 \text{ bits}
+    = 7{,}840{,}000 \text{ bits} = 980 \text{ kB}
+  \label{eq:tm-model-size}
+\end{equation}
+
+During training, each automaton also stores its state (typically 8
+bits for $N \leq 128$), adding another 980~kB. At inference time,
+only the bitmasks are needed.
+
+\begin{engineernote}
+The 980~kB inference model fits comfortably in the L2 cache of any
+modern CPU (typically 256~kB to 8~MB)~\cite{wheeldon2020pervasive}. This means clause evaluation
+runs entirely from cache, with zero main memory accesses during
+inference. Compare this to a floating-point network where 784 $\times$
+300 $\times$ 4~bytes = 940~kB just for the first layer's weights---similar
+size but requiring FP arithmetic instead of bitwise operations.
+\end{engineernote}
+
+
+% ----------------------------------------------------------------------------
+\section{The Clause Output as Features}
+\label{sec:clause-features}
+% ----------------------------------------------------------------------------
+
+For the hybrid architecture, the Tsetlin Machine's role is not just
+classification but \concept{feature extraction}. The clause outputs
+themselves are valuable binary features that capture learned patterns
+in the data.
+
+With 500 clauses per class and 10 classes, we have 5000 clause
+outputs---each a binary value indicating whether a specific pattern
+is present in the current image. These 5000 bits form a rich,
+learned feature representation that can be fed into the Logic Gate
+Network (\cref{ch:diff-gates}).
+
+\begin{keyinsight}
+The Tsetlin Machine transforms a 1568-dimensional literal vector
+(raw pixel features) into a 5000-dimensional clause output vector
+(learned pattern features). Each dimension answers a specific
+yes/no question: ``Does this image contain pattern~$j$?'' This
+binary feature representation is the interface between the Tsetlin
+stage and the Logic Gate Network stage of the hybrid architecture.
+\end{keyinsight}
+
+The clause outputs have several desirable properties as features:
+\begin{itemize}
+  \item \textbf{Binary:} Perfect for feeding into logic gates.
+  \item \textbf{Interpretable:} Each feature corresponds to a
+    readable clause.
+  \item \textbf{Sparse:} For any given input, most clauses output~0.
+    Only the 10--50 clauses that match fire. This sparsity can be
+    exploited for efficiency.
+  \item \textbf{Diverse:} The stochastic training ensures different
+    clauses detect different patterns, giving a rich feature set.
+\end{itemize}
+
+
+% ----------------------------------------------------------------------------
+\section{Limitations and What Comes Next}
+\label{sec:tm-limitations}
+% ----------------------------------------------------------------------------
+
+The standalone Tsetlin Machine has several limitations that motivate
+the hybrid approach:
+
+\begin{enumerate}
+  \item \textbf{Linear voting:} The clause vote is a simple sum. It
+    cannot learn nonlinear combinations of clause outputs. If
+    recognising a digit requires ``clause~17 fires AND clause~42 does
+    NOT fire,'' the linear vote cannot express this.
+
+  \item \textbf{Independent clauses:} Each clause is trained
+    independently (modulo the shared vote threshold). There is no
+    mechanism for clauses to explicitly cooperate or specialise.
+
+  \item \textbf{Slow convergence:} The stochastic, one-state-at-a-time
+    updates are robust but slow compared to gradient descent. Training
+    a large Tsetlin Machine can take 50--200 epochs.
+
+  \item \textbf{No composition:} Clauses operate directly on the
+    input features. There is no hierarchy---no ``clause of clauses''
+    that builds higher-level concepts from lower-level patterns.
+\end{enumerate}
+
+The Logic Gate Network~\cite{petersen2022difflogic} addresses limitations 1 and 4: it learns
+nonlinear combinations of clause outputs arranged in a layered
+hierarchy. The LUT compilation~\cite{liu2024kan} addresses efficiency: it precomputes
+the scoring functions into lookup tables for minimal-cost inference.
+
+In Part~III, we will see how the Logic Gate Network takes the Tsetlin
+Machine's clause outputs and learns to combine them through logic
+gates, creating a deeper and more expressive classifier while
+maintaining the all-Boolean character of the architecture.

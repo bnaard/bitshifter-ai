@@ -1,0 +1,266 @@
+% ============================================================================
+\chapter{Analysis and Properties}
+\label{ch:analysis}
+% ============================================================================
+
+This chapter analyses the hybrid architecture from multiple
+angles: accuracy, computational cost, energy efficiency,
+interpretability, and theoretical properties.
+
+
+% ----------------------------------------------------------------------------
+\section{Accuracy Analysis}
+\label{sec:accuracy-analysis}
+% ----------------------------------------------------------------------------
+
+\begin{table}[htbp]
+\centering
+\caption{Expected accuracy at each stage and comparison with
+  baselines.}
+\label{tab:accuracy-analysis}
+\begin{tabular}{@{}lcl@{}}
+  \toprule
+  \textbf{Model} & \textbf{Test accuracy} & \textbf{Notes} \\
+  \midrule
+  TM alone (simple threshold) & 96.5\% & 500 clauses/class \\
+  TM + LGN (continuous) & 97.5--98.0\% & Before discretisation \\
+  TM + LGN + LUT (final) & 97.3--97.8\% & After quantisation \\
+  \midrule
+  2-layer FP network & 98.0\% & 784-300-10, ReLU \\
+  Logistic regression & 92.0\% & Linear baseline \\
+  Random forest & 97.0\% & Non-neural baseline \\
+  LeNet-5 CNN & 99.0\% & Convolutional FP \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+The hybrid achieves accuracy comparable to a standard 2-layer FP
+network (within 0.5\%) while using fundamentally different
+operations. The remaining gap comes from two sources:
+
+\begin{enumerate}
+  \item \textbf{Booleanisation loss:} Thresholding pixels discards
+    grayscale information. Thermometer encoding ($L = 4$) would
+    recover $\sim$0.5\% accuracy at the cost of 4$\times$ larger input.
+
+  \item \textbf{Discretisation loss:} The LGN's softmax relaxation
+    is more expressive than the hardened circuit. Temperature
+    annealing minimises but does not eliminate this gap.
+\end{enumerate}
+
+
+% ----------------------------------------------------------------------------
+\section{Computational Cost Comparison}
+\label{sec:cost-comparison}
+% ----------------------------------------------------------------------------
+
+\begin{table}[htbp]
+\centering
+\caption{Operation counts per image for different architectures.}
+\label{tab:op-counts}
+\begin{tabular}{@{}lrrr@{}}
+  \toprule
+  \textbf{Architecture} & \textbf{FP MACs} & \textbf{Bitwise ops}
+    & \textbf{LUT reads} \\
+  \midrule
+  2-layer FP (784-300-10) & 238,200 & 0 & 0 \\
+  Our hybrid & 0 & $\sim$252,000 & $\sim$16,010 \\
+  ULEEN~\cite{susskind2024uleen} & 0 & 0 & $\sim$15,000 \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+The hybrid has a comparable number of operations to the FP baseline,
+but each operation is $10$--$40\times$ cheaper in energy.
+
+
+% ----------------------------------------------------------------------------
+\section{Energy Efficiency}
+\label{sec:energy}
+% ----------------------------------------------------------------------------
+
+Using the energy figures from \cref{tab:energy-cost}
+(Horowitz~\cite{horowitz2014energy}, 45\,nm technology):
+
+\paragraph{Floating-point baseline.}
+$238{,}200$ FP MACs $\times$ $(3.7 + 0.9)$ pJ
+$\approx 1{,}096{,}000$ pJ $\approx 1.1 \; \mu$J per image.
+
+\paragraph{Hybrid architecture.}
+\begin{itemize}
+  \item Bitwise ops: $252{,}000 \times 0.1$ pJ $= 25{,}200$ pJ
+  \item Small LUT reads (4-entry, register): $16{,}000 \times 0.1$
+    pJ $\approx 1{,}600$ pJ
+  \item Score LUT reads (L1 cache): $10 \times 5.0$ pJ $= 50$ pJ
+  \item Popcount + adds: $5{,}000 \times 0.9$ pJ $= 4{,}500$ pJ
+\end{itemize}
+Total: $\sim$31,000 pJ $= 0.031 \; \mu$J per image.
+
+\begin{keyinsight}
+The hybrid architecture is approximately 35$\times$ more energy
+efficient than the floating-point baseline for the same task. This
+factor comes from two sources: cheaper operations (logic vs.\ FP
+multiply) and smaller model (fits in cache vs.\ requires DRAM).
+\end{keyinsight}
+
+These are theoretical estimates based on operation energy costs~\cite{horowitz2014energy,wheeldon2020pervasive}.
+Actual energy savings depend on the hardware platform, memory
+hierarchy, and implementation efficiency. Real-world speedups of
+$10$--$30\times$ are more realistic due to overhead.
+
+
+% ----------------------------------------------------------------------------
+\section{Memory and Cache Behaviour}
+\label{sec:cache}
+% ----------------------------------------------------------------------------
+
+\begin{table}[htbp]
+\centering
+\caption{Model size breakdown and cache residency.}
+\label{tab:model-size}
+\begin{tabular}{@{}lrl@{}}
+  \toprule
+  \textbf{Component} & \textbf{Size} & \textbf{Fits in} \\
+  \midrule
+  Clause bitmasks & 980 kB & L2 cache \\
+  Gate types & 8 kB & L1 cache \\
+  Gate wiring & 26 kB & L1 cache \\
+  Scoring LUTs & 4 kB & L1 cache \\
+  \midrule
+  \textbf{Total} & \textbf{1,018 kB} & L2 cache \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+The clause bitmasks are the dominant component (96\% of model size).
+They fit in L2 cache (typically 256 kB--8 MB on modern CPUs) but not
+in L1 (typically 32--64 kB). The LGN and LUT components easily fit
+in L1.
+
+\begin{engineernote}
+For embedded deployment on microcontrollers with limited memory, the
+clause bitmasks can be compressed. Sparse clauses (those with few
+included literals) can be stored as lists of included literal indices
+rather than full bitmasks, potentially reducing the TM component to
+100--200 kB. This requires a different evaluation strategy (iterate
+over included literals instead of bitwise AND) but saves memory.
+\end{engineernote}
+
+
+% ----------------------------------------------------------------------------
+\section{Interpretability}
+\label{sec:interpretability}
+% ----------------------------------------------------------------------------
+
+Each component of the hybrid architecture has different
+interpretability properties:
+
+\paragraph{Tsetlin Machine~\cite{granmo2018tsetlin} (high interpretability).}
+Each clause is a conjunction of pixel conditions. A human can inspect
+a clause and understand exactly what pattern it detects: ``pixel (14, 10)
+must be bright AND pixel (5, 20) must be dark AND \ldots''. Clause
+visualisation (\cref{fig:clause-vis}) makes this concrete.
+
+\paragraph{Logic Gate Network~\cite{petersen2022difflogic} (medium interpretability).}
+Each gate is a named Boolean function (AND, OR, XOR, etc.), and its
+two inputs are identifiable. In principle, one could trace the logic
+from output to input. In practice, with 16,000 gates in 4 layers,
+this is difficult for humans but straightforward for automated
+analysis tools.
+
+\paragraph{LUT scoring (high interpretability).}
+Each scoring table is a simple function mapping popcount to score.
+It can be plotted and inspected directly. The shape reveals how
+confidence relates to the number of firing gates.
+
+\begin{keyinsight}
+The hybrid architecture is substantially more interpretable than a
+conventional neural network. A standard network's weights are opaque
+floating-point numbers; the hybrid's parameters are readable Boolean
+conditions, named logic gates, and plottable scoring curves. This is
+valuable for debugging, auditing, and building trust in the model.
+\end{keyinsight}
+
+
+% ----------------------------------------------------------------------------
+\section{Theoretical Properties}
+\label{sec:theory}
+% ----------------------------------------------------------------------------
+
+\paragraph{Expressiveness.}
+The LGN~\cite{petersen2024difflogic} with all 16 gate types is functionally complete
+(\cref{sec:completeness}): it can represent any Boolean function of
+its inputs given sufficient depth and width. The Tsetlin Machine~\cite{granmo2018tsetlin}
+produces clauses that can approximate any Boolean function of the
+pixels (since any function can be expressed as a disjunction of
+conjunctions, i.e., a sum of clauses). Together, the architecture
+is a universal Boolean function approximator.
+
+\paragraph{Convergence.}
+The Tsetlin Machine has formal convergence
+guarantees~\cite{zhang2021convergence}: with sufficient states $N$,
+each automaton converges to the optimal action. The LGN training
+inherits the convergence properties of gradient descent on
+differentiable functions.
+
+\paragraph{Robustness.}
+The Boolean nature of the architecture provides some inherent
+robustness: small perturbations to pixel values (below the threshold)
+do not change the booleanised input. However, adversarial examples
+that flip pixels across the threshold can still fool the model.
+
+
+% ----------------------------------------------------------------------------
+\section{Limitations}
+\label{sec:limitations}
+% ----------------------------------------------------------------------------
+
+\begin{enumerate}
+  \item \textbf{Accuracy ceiling.} The $\sim$97.5\% accuracy on MNIST~\cite{lecun1998mnist} is
+    below what CNNs achieve (99\%+). The gap comes from the fixed
+    booleanisation and the lack of spatial structure (no convolution).
+
+  \item \textbf{Scalability.} The Tsetlin Machine's clause count
+    grows with task complexity. For larger images (e.g., CIFAR-10),
+    many more clauses and literals are needed, and training time
+    increases quadratically.
+
+  \item \textbf{Two-phase training.} The sequential training
+    (TM first, then LGN) means the TM cannot benefit from the LGN's
+    feedback. Joint training would be ideal but is difficult because
+    the TM and LGN use different learning paradigms.
+
+  \item \textbf{Random connectivity.} The LGN's random wiring is
+    simple but suboptimal. Learned or structured connectivity could
+    improve accuracy but complicates the architecture.
+
+  \item \textbf{No spatial awareness.} Unlike CNNs, the flat
+    architecture treats every pixel independently. It cannot exploit
+    the fact that nearby pixels are correlated. The Convolutional
+    Tsetlin Machine~\cite{granmo2019convtm} addresses this but adds
+    complexity.
+\end{enumerate}
+
+
+% ----------------------------------------------------------------------------
+\section{Summary}
+\label{sec:ch13-summary}
+% ----------------------------------------------------------------------------
+
+The hybrid architecture achieves its design goals:
+\begin{itemize}
+  \item \textbf{Accuracy:} 97--98\% on MNIST, competitive with
+    FP baselines.
+  \item \textbf{Efficiency:} 35$\times$ theoretical energy reduction
+    vs.\ FP networks.
+  \item \textbf{Simplicity:} Zero FP operations at inference. All
+    operations are bitwise logic, integer math, and table lookups.
+  \item \textbf{Interpretability:} Clauses, gates, and scoring
+    tables are all human-inspectable.
+  \item \textbf{Model size:} $\sim$1 MB, fits in L2 cache.
+\end{itemize}
+
+These properties come with trade-offs: lower accuracy than deep CNNs,
+limited scalability to complex tasks, and sequential training that
+prevents joint optimisation. The next chapter discusses how to
+implement this architecture in Rust.

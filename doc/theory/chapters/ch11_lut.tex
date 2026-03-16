@@ -1,0 +1,281 @@
+% ============================================================================
+\chapter{Compiling to Lookup Tables}
+\label{ch:lut}
+% ============================================================================
+
+This chapter describes Phase~3 of the hybrid architecture: compiling
+any remaining continuous functions into discrete lookup tables (LUTs).
+After this step, the entire inference pipeline operates on Boolean
+logic, integer arithmetic, and memory reads---with zero floating-point
+operations.
+
+
+% ----------------------------------------------------------------------------
+\section{The LUT Compilation Idea}
+\label{sec:lut-idea}
+% ----------------------------------------------------------------------------
+
+A lookup table replaces computation with memory: instead of evaluating
+$f(x)$ at runtime, we precompute $f(x)$ for every possible input $x$
+and store the results. At inference time, we simply read $f(x)$ from
+memory.
+
+\begin{equation}
+  \text{LUT}[i] = f(i) \quad \text{for } i = 0, 1, \ldots, M{-}1
+  \label{eq:lut-def}
+\end{equation}
+
+This is only practical when the number of possible inputs $M$ is
+small. For a B-spline~\cite{deboor1978splines} scoring function whose input is a popcount
+value in $[0, 200]$, $M = 201$---trivially small.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  box/.style={draw, rounded corners, minimum width=2cm,
+    minimum height=0.8cm, font=\small\sffamily, align=center},
+  arr/.style={-{Stealth[length=4pt]}, thick},
+]
+  % Training time
+  \node[font=\sffamily\bfseries] at (3, 3) {Training time};
+  \node[box, fill=bitorange!10] (input1) at (0, 2) {popcount\\value};
+  \node[box, fill=bitblue!10] (spline) at (3.5, 2) {B-spline\\$\phi_k(x)$};
+  \node[box, fill=bitgreen!10] (score1) at (7, 2) {class\\score};
+  \draw[arr] (input1) -- (spline);
+  \draw[arr] (spline) -- (score1);
+
+  % Compilation arrow
+  \draw[->, very thick, bitpurple, dashed] (3.5, 1.2) -- (3.5, 0.3)
+    node[midway, right, font=\scriptsize\sffamily] {compile};
+
+  % Inference time
+  \node[font=\sffamily\bfseries] at (3, -0.5) {Inference time};
+  \node[box, fill=bitorange!10] (input2) at (0, -1.5) {popcount\\value};
+  \node[box, fill=bitpurple!10] (lut) at (3.5, -1.5) {LUT\\read};
+  \node[box, fill=bitgreen!10] (score2) at (7, -1.5) {class\\score};
+  \draw[arr] (input2) -- (lut);
+  \draw[arr] (lut) -- (score2);
+\end{tikzpicture}
+\caption{LUT compilation replaces a B-spline evaluation (training time)
+  with a simple table read (inference time). The function is computed
+  once and stored; inference is a single memory access.}
+\label{fig:lut-compile}
+\end{figure}
+
+
+% ----------------------------------------------------------------------------
+\section{The Compilation Process}
+\label{sec:compilation}
+% ----------------------------------------------------------------------------
+
+For each scoring function $\phi_k$:
+
+\begin{enumerate}
+  \item \textbf{Determine the input range.} The input is a popcount
+    of binary gate outputs, so $x \in \{0, 1, \ldots, n_k\}$ where
+    $n_k$ is the number of output gates for class $k$.
+
+  \item \textbf{Evaluate the trained B-spline} at every integer
+    input: compute $\phi_k(0), \phi_k(1), \ldots, \phi_k(n_k)$ in
+    floating point.
+
+  \item \textbf{Quantise to integers.} Convert each floating-point
+    score to a fixed-point integer representation:
+    \begin{equation}
+      \text{LUT}_k[i] = \text{round}\!\left(
+        \frac{\phi_k(i) - \phi_{\min}}{\phi_{\max} - \phi_{\min}}
+        \times (2^b - 1)\right)
+      \label{eq:quantise}
+    \end{equation}
+    where $b$ is the bit width (e.g., $b = 8$ for 8-bit integers)
+    and $\phi_{\min}, \phi_{\max}$ are the range of the function.
+
+  \item \textbf{Store the table.} The result is an array of $n_k + 1$
+    integer values.
+\end{enumerate}
+
+\begin{engineernote}
+With 8-bit quantisation and 201 entries per class:
+\[
+  \text{Total LUT size} = 10 \times 201 \times 1 \text{ byte}
+  = 2{,}010 \text{ bytes} \approx 2 \text{ kB}
+\]
+This is negligible. Even with 16-bit entries, the total is 4~kB.
+\end{engineernote}
+
+
+% ----------------------------------------------------------------------------
+\section{Quantisation Error}
+\label{sec:quant-error}
+% ----------------------------------------------------------------------------
+
+Quantising a continuous function to $b$-bit integers introduces
+\concept{quantisation error}. The maximum error per entry is:
+
+\begin{equation}
+  \epsilon_{\max} = \frac{\phi_{\max} - \phi_{\min}}{2^{b+1}}
+  \label{eq:quant-error}
+\end{equation}
+
+For $b = 8$: $\epsilon_{\max} = \frac{\phi_{\max} - \phi_{\min}}{512}$.
+Since the scoring function's range is typically small (e.g., $[-5, 5]$
+for log-probability scores), the quantisation error is about 0.02 per
+entry. This rarely changes the argmax classification.
+
+\begin{keyinsight}
+The classification decision depends on the \emph{relative ordering}
+of class scores, not their absolute values. Quantisation preserves
+relative ordering as long as the quantisation error is smaller than
+the gap between the top two class scores. For well-trained models,
+this gap is usually large (the correct class is confident), so 8-bit
+quantisation introduces negligible accuracy loss.
+\end{keyinsight}
+
+
+% ----------------------------------------------------------------------------
+\section{ULEEN: An Extreme LUT Architecture}
+\label{sec:uleen}
+% ----------------------------------------------------------------------------
+
+The ULEEN architecture~\cite{susskind2024uleen} pushes the LUT idea
+to its logical extreme: \emph{the entire network is lookup tables.}
+
+In ULEEN:
+\begin{enumerate}
+  \item The input bits are grouped into small subsets (e.g., 8 bits
+    each).
+  \item Each subset indexes into a LUT with $2^8 = 256$ entries.
+  \item The LUT outputs are combined (summed or concatenated) and
+    fed into the next layer of LUTs.
+  \item This continues for 2--3 layers.
+\end{enumerate}
+
+ULEEN achieves 96.2\% accuracy on MNIST~\cite{lecun1998mnist} with a model size of only
+16.9~kB. Inference requires only memory reads and integer
+additions---no multiplications, no logic gate evaluations, not even
+comparisons (beyond the final argmax).
+
+\begin{table}[htbp]
+\centering
+\caption{Comparison of LUT-based approaches.}
+\label{tab:lut-comparison}
+\begin{tabular}{@{}lccc@{}}
+  \toprule
+  \textbf{Approach} & \textbf{Accuracy} & \textbf{Model size}
+    & \textbf{Operations} \\
+  \midrule
+  ULEEN~\cite{susskind2024uleen} & 96.2\% & 16.9 kB & Table reads + adds \\
+  Our hybrid (projected) & 97--98\% & $\sim$1 MB & AND + gate LUT + score LUT \\
+  2-layer FP network & 98.0\% & $\sim$940 kB & FP multiply-add \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\begin{engineernote}
+ULEEN shows that pure-LUT architectures are viable. Our hybrid
+approach trades a larger model size for higher accuracy by using the
+Tsetlin Machine and LGN to build a richer feature representation
+before the final LUT scoring.
+\end{engineernote}
+
+
+% ----------------------------------------------------------------------------
+\section{The Complete Inference Cost}
+\label{sec:inference-cost}
+% ----------------------------------------------------------------------------
+
+After LUT compilation, the total inference cost for one MNIST image:
+
+\begin{table}[htbp]
+\centering
+\caption{Operation count for the complete hybrid inference pipeline.}
+\label{tab:inference-cost}
+\begin{tabular}{@{}llr@{}}
+  \toprule
+  \textbf{Stage} & \textbf{Operation type} & \textbf{Count} \\
+  \midrule
+  Booleanise + expand & Comparisons, NOT & $\sim$1,600 \\
+  TM clause evaluation & Bitwise AND, compare & $\sim$250,000 \\
+  LGN gate evaluation & 4-entry LUT reads & $\sim$16,000 \\
+  Popcount & Integer addition & $\sim$5,000 \\
+  Score lookup & 201-entry LUT reads & 10 \\
+  Argmax & Integer comparisons & 9 \\
+  \midrule
+  \textbf{Total} & & $\sim$273,000 \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+All operations are: bitwise logic, integer comparison, integer
+addition, and memory reads from small tables. The energy cost per
+operation is 0.1--5~pJ (logic and SRAM), compared to 3.7~pJ for each
+floating-point multiply in a conventional network~\cite{horowitz2014energy}.
+
+\begin{keyinsight}
+The hybrid architecture achieves its energy efficiency not by having
+fewer operations, but by using \emph{cheaper} operations. Each
+operation costs 10--40$\times$ less energy than a floating-point
+multiply-accumulate, and the model fits entirely in L1/L2 cache,
+avoiding the 6,400$\times$ cost of DRAM accesses~\cite{horowitz2014energy}.
+\end{keyinsight}
+
+
+% ----------------------------------------------------------------------------
+\section{Generalisation: LUTs for Any Bounded-Input Function}
+\label{sec:generalisation}
+% ----------------------------------------------------------------------------
+
+The LUT compilation technique applies whenever:
+\begin{enumerate}
+  \item The input to the function has a small, finite number of
+    possible values.
+  \item The function is known (trained) before deployment.
+  \item There is enough memory to store the table.
+\end{enumerate}
+
+In our architecture, the scoring functions have at most 201 possible
+inputs (popcount values 0--200). But the same technique could be
+applied to:
+
+\begin{itemize}
+  \item \textbf{Non-linear combination of two integer inputs:}
+    If two popcounts $a \in [0, 50]$ and $b \in [0, 50]$ need to be
+    combined, a 2D LUT of $51 \times 51 = 2601$ entries stores the
+    result.
+  \item \textbf{Activation functions in quantised networks~\cite{hubara2017quantized}:} A
+    quantised activation with 8-bit input has $256$ possible values,
+    all storable in a 256-entry table.
+  \item \textbf{Distance computations:} If both inputs are bounded
+    integers, Hamming distance or other metrics can be precomputed.
+\end{itemize}
+
+The cost of a LUT scales as $\prod_i |D_i|$ where $|D_i|$ is the
+number of possible values for input $i$. For one input with 256
+values: 256 entries. For two inputs with 256 values each:
+$256^2 = 65{,}536$ entries. For three: $256^3 \approx 16.7$ million.
+The exponential growth limits LUTs to functions of few inputs, which
+is why we use them only for the final scoring layer.
+
+
+% ----------------------------------------------------------------------------
+\section{Summary}
+\label{sec:ch11-summary}
+% ----------------------------------------------------------------------------
+
+LUT compilation is the final step that eliminates all floating-point
+arithmetic from the inference pipeline:
+
+\begin{enumerate}
+  \item Trained B-spline scoring functions are evaluated at every
+    possible integer input.
+  \item The results are quantised to fixed-precision integers and
+    stored in small tables.
+  \item At inference time, a table read replaces the function
+    evaluation.
+  \item The quantisation error is negligible for well-trained models
+    with 8-bit precision.
+\end{enumerate}
+
+With this step complete, we have all three components of the hybrid
+architecture. Part~V assembles them into a single system and analyses
+the result.

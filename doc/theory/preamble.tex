@@ -1,0 +1,137 @@
+% ============================================================================
+% Shared preamble for the theory book
+% ============================================================================
+
+% --- Core packages ---
+\usepackage{fontspec}
+\usepackage[english]{babel}
+\usepackage[top=2.5cm, bottom=2.5cm, inner=3cm, outer=2.5cm]{geometry}
+
+% --- Typography ---
+\usepackage{microtype}
+\setmainfont{Latin Modern Roman}
+\setsansfont{Latin Modern Sans}
+\setmonofont{Latin Modern Mono}
+
+% --- Math ---
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{mathtools}
+\usepackage{bm}
+
+% --- Graphics and diagrams ---
+\usepackage{tikz}
+\usetikzlibrary{
+  arrows.meta, positioning, calc, decorations.pathreplacing,
+  shapes.geometric, shapes.misc, fit, backgrounds, patterns,
+  matrix, chains, circuits.logic.US, automata
+}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+
+% --- Tables and lists ---
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{enumitem}
+
+% --- Colors ---
+\usepackage{xcolor}
+\definecolor{bitblue}{HTML}{2563EB}
+\definecolor{bitgreen}{HTML}{16A34A}
+\definecolor{bitorange}{HTML}{EA580C}
+\definecolor{bitpurple}{HTML}{9333EA}
+\definecolor{bitgray}{HTML}{6B7280}
+\definecolor{lightbg}{HTML}{F8FAFC}
+\definecolor{darkbg}{HTML}{1E293B}
+
+% --- Code and algorithms ---
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+% --- Headers and footers ---
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[LE]{\small\itshape\leftmark}
+\fancyhead[RO]{\small\itshape\rightmark}
+\fancyfoot[LE,RO]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% --- Hyperlinks and references ---
+\usepackage[
+  colorlinks=true,
+  linkcolor=bitblue,
+  citecolor=bitgreen,
+  urlcolor=bitorange
+]{hyperref}
+\usepackage[capitalise,noabbrev]{cleveref}
+
+% --- Bibliography ---
+\usepackage[
+  backend=biber,
+  style=numeric-comp,
+  sorting=nyt,
+  maxbibnames=99
+]{biblatex}
+\addbibresource{references.bib}
+
+% --- Theorem environments ---
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}[chapter]
+\newtheorem{example}{Example}[chapter]
+\theoremstyle{remark}
+\newtheorem{remark}{Remark}[chapter]
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[chapter]
+\newtheorem{lemma}[theorem]{Lemma}
+
+% --- Custom commands ---
+\newcommand{\bitop}[1]{\texttt{\textcolor{bitblue}{#1}}}
+\newcommand{\concept}[1]{\textbf{\textcolor{bitpurple}{#1}}}
+\newcommand{\bvec}[1]{\bm{#1}}  % bold vector
+\newcommand{\bmat}[1]{\bm{#1}}  % bold matrix
+\newcommand{\popcount}{\operatorname{popcount}}
+\newcommand{\sign}{\operatorname{sign}}
+\newcommand{\TruthTable}{\operatorname{TT}}
+
+% --- Custom environments ---
+\usepackage{tcolorbox}
+\tcbuselibrary{skins, breakable}
+
+\newtcolorbox{keyinsight}[1][]{
+  enhanced, breakable,
+  colback=bitblue!5, colframe=bitblue!70,
+  fonttitle=\bfseries,
+  title={Key Insight},
+  #1
+}
+
+\newtcolorbox{engineernote}[1][]{
+  enhanced, breakable,
+  colback=bitgreen!5, colframe=bitgreen!70,
+  fonttitle=\bfseries,
+  title={Engineer's Note},
+  #1
+}
+
+\newtcolorbox{analogy}[1][]{
+  enhanced, breakable,
+  colback=bitorange!5, colframe=bitorange!70,
+  fonttitle=\bfseries,
+  title={Analogy},
+  #1
+}
+
+\newtcolorbox{warning}[1][]{
+  enhanced, breakable,
+  colback=red!5, colframe=red!70,
+  fonttitle=\bfseries,
+  title={Warning},
+  #1
+}
+
+% --- Chapter style ---
+\usepackage{titlesec}
+\titleformat{\chapter}[display]
+  {\normalfont\huge\bfseries}
+  {\chaptertitlename\ \thechapter}{20pt}{\Huge}
+\titlespacing*{\chapter}{0pt}{-30pt}{40pt}

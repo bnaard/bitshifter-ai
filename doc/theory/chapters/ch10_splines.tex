@@ -1,0 +1,299 @@
+% ============================================================================
+\chapter{B-Splines and Learnable Activation Functions}
+\label{ch:splines}
+% ============================================================================
+
+This chapter introduces the mathematical foundation for the third
+component of the hybrid architecture: learnable functions that are
+smooth during training but can be discretised into lookup tables for
+deployment. The key tool is the B-spline, a flexible curve defined by
+a small set of control points.
+
+
+% ----------------------------------------------------------------------------
+\section{Why Learnable Functions?}
+\label{sec:why-learnable}
+% ----------------------------------------------------------------------------
+
+In a conventional neural network, activation functions (ReLU, sigmoid,
+etc.) are fixed by the architect. The \concept{Kolmogorov--Arnold
+Network} (KAN)~\cite{liu2024kan} proposes a radical alternative: let
+the network \emph{learn} its activation functions during training.
+
+This is motivated by the Kolmogorov--Arnold representation theorem~\cite{kolmogorov1957representation}:
+
+\begin{theorem}[Kolmogorov--Arnold, 1957~\cite{kolmogorov1957representation}]
+\label{thm:ka}
+Any continuous function $f : [0,1]^n \to \mathbb{R}$ can be written as:
+\begin{equation}
+  f(x_1, \ldots, x_n) = \sum_{q=0}^{2n} \Phi_q\!\left(
+    \sum_{p=1}^{n} \phi_{q,p}(x_p)\right)
+  \label{eq:ka-theorem}
+\end{equation}
+where $\phi_{q,p} : [0,1] \to \mathbb{R}$ and
+$\Phi_q : \mathbb{R} \to \mathbb{R}$ are continuous functions.
+\end{theorem}
+
+The theorem says that multivariate functions can be decomposed into
+compositions and sums of \emph{univariate} functions ($\phi$ and
+$\Phi$). If we can learn these univariate functions well, we can
+represent any continuous mapping.
+
+\begin{analogy}
+Traditional neural networks are like a factory with fixed machines
+(ReLU, sigmoid) connected by adjustable conveyor belts (weights). The
+KAN approach is like a factory where the machines themselves are
+reprogrammable---each machine learns the optimal transformation for
+its position in the assembly line.
+\end{analogy}
+
+
+% ----------------------------------------------------------------------------
+\section{B-Splines: A Primer}
+\label{sec:bsplines}
+% ----------------------------------------------------------------------------
+
+A \concept{B-spline} (basis spline) is a smooth, piecewise polynomial
+curve defined by \emph{control points} and
+\emph{knots}~\cite{deboor1978splines}.
+
+\begin{definition}[B-spline curve]
+Given $n+1$ control points $c_0, c_1, \ldots, c_n$ and a knot vector
+$\bvec{t} = (t_0, t_1, \ldots, t_{n+k})$, the B-spline of degree
+$k{-}1$ is:
+\begin{equation}
+  S(x) = \sum_{i=0}^{n} c_i \cdot B_{i,k}(x)
+  \label{eq:bspline}
+\end{equation}
+where $B_{i,k}(x)$ are the B-spline basis functions, defined
+recursively by the Cox--de~Boor formula.
+\end{definition}
+
+For our purposes, the important properties are:
+
+\begin{enumerate}
+  \item \textbf{Smooth:} B-splines are continuously differentiable
+    (up to degree $k{-}2$). Gradients flow through them.
+  \item \textbf{Local control:} Moving one control point affects
+    only a nearby portion of the curve. This makes learning stable.
+  \item \textbf{Compact representation:} A curve is defined by a
+    small number of control points (typically 8--16), regardless of
+    how many points you evaluate it at.
+  \item \textbf{Evaluable:} Given an input $x$, the output $S(x)$
+    can be computed in $O(k)$ operations.
+\end{enumerate}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth]
+  \begin{axis}[
+    width=10cm, height=5cm,
+    xlabel={Input $x$}, ylabel={Output $S(x)$},
+    xmin=0, xmax=1, ymin=-0.5, ymax=1.5,
+    grid=major, grid style={bitgray!20},
+    every axis label/.style={font=\small\sffamily},
+    tick label style={font=\small},
+  ]
+    % A smooth learned function
+    \addplot[very thick, bitblue, smooth, domain=0:1, samples=100]
+      {0.2 + 0.8*sin(deg(3.14*x)) - 0.3*sin(deg(6.28*x))};
+
+    % Control points
+    \addplot[only marks, mark=*, mark size=3pt, bitorange]
+      coordinates {
+        (0, 0.2) (0.125, 0.5) (0.25, 0.9)
+        (0.375, 1.1) (0.5, 0.8) (0.625, 0.4)
+        (0.75, 0.1) (0.875, 0.3) (1.0, 0.5)
+      };
+
+    \node[font=\scriptsize\sffamily, bitorange] at (axis cs:0.85, 1.2)
+      {control points};
+    \node[font=\scriptsize\sffamily, bitblue] at (axis cs:0.15, 1.2)
+      {learned curve};
+  \end{axis}
+\end{tikzpicture}
+\caption{A B-spline curve defined by 9 control points (orange dots).
+  The smooth curve (blue) passes near the control points. During
+  training, gradient descent adjusts the control points to minimise
+  the loss.}
+\label{fig:bspline}
+\end{figure}
+
+
+% ----------------------------------------------------------------------------
+\section{KAN: Putting Splines on Edges}
+\label{sec:kan}
+% ----------------------------------------------------------------------------
+
+In a traditional neural network, computation is:
+\begin{equation}
+  y = \sigma(w \cdot x + b)
+  \label{eq:trad-neuron-recap}
+\end{equation}
+The \emph{weight} $w$ on the edge is a single number (linear
+scaling), and the \emph{activation} $\sigma$ on the node is a fixed
+function.
+
+In a KAN, this is reversed:
+\begin{equation}
+  y = \sum_{i} \phi_i(x_i)
+  \label{eq:kan-neuron}
+\end{equation}
+The \emph{edge} carries a learnable function $\phi_i$ (a B-spline),
+and the \emph{node} is a simple summation.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  input/.style={circle, draw, minimum size=0.6cm, font=\small},
+  neuron/.style={circle, draw, minimum size=0.9cm, font=\small,
+    fill=bitblue!10},
+  spline/.style={draw, rounded corners, fill=bitorange!10,
+    minimum width=1.2cm, minimum height=0.5cm, font=\tiny\sffamily},
+  >=Stealth
+]
+  % Traditional
+  \node[font=\small\sffamily\bfseries] at (0, 3) {Traditional};
+  \node[input] (t1) at (-1, 1.5) {$x_1$};
+  \node[input] (t2) at (-1, 0) {$x_2$};
+  \node[neuron] (tn) at (1.5, 0.75) {$\sigma(\Sigma)$};
+  \draw[->, thick] (t1) -- (tn) node[midway, above, font=\tiny, sloped] {$w_1$};
+  \draw[->, thick] (t2) -- (tn) node[midway, below, font=\tiny, sloped] {$w_2$};
+
+  % KAN
+  \node[font=\small\sffamily\bfseries] at (6, 3) {KAN};
+  \node[input] (k1) at (5, 1.5) {$x_1$};
+  \node[input] (k2) at (5, 0) {$x_2$};
+  \node[neuron] (kn) at (8.5, 0.75) {$\Sigma$};
+  \node[spline] (s1) at (6.7, 1.5) {$\phi_1$};
+  \node[spline] (s2) at (6.7, 0) {$\phi_2$};
+  \draw[->, thick] (k1) -- (s1);
+  \draw[->, thick] (s1) -- (kn);
+  \draw[->, thick] (k2) -- (s2);
+  \draw[->, thick] (s2) -- (kn);
+\end{tikzpicture}
+\caption{Traditional neuron vs.\ KAN neuron. In a traditional neuron,
+  edges carry scalar weights and the node applies a fixed activation.
+  In a KAN, edges carry learnable functions (B-splines) and the node
+  simply sums.}
+\label{fig:kan-vs-trad}
+\end{figure}
+
+Each learnable function $\phi_i$ is a B-spline~\cite{deboor1978splines} with (say) 8 control
+points. The control points are the trainable parameters. During
+training, backpropagation adjusts these control points to minimise
+the loss.
+
+
+% ----------------------------------------------------------------------------
+\section{Relevance to Our Architecture}
+\label{sec:relevance}
+% ----------------------------------------------------------------------------
+
+Our hybrid architecture does not use a full KAN. Instead, it borrows
+the key idea: \emph{learnable univariate functions that can be
+compiled to lookup tables.}
+
+The specific application is in the scoring layer. After the LGN
+produces binary outputs, we need to aggregate them into class scores.
+A simple approach is popcount (count the 1s for each class group),
+but a learned scoring function can be more effective:
+
+\begin{equation}
+  s_k = \phi_k\!\left(\sum_{j \in \text{group}_k} g_j\right)
+  \label{eq:scoring}
+\end{equation}
+
+Here, $\sum g_j$ is the popcount of the gate outputs for class $k$,
+and $\phi_k$ is a learned function that maps this count to a score.
+During training, $\phi_k$ is a B-spline. After training, it is
+compiled into a lookup table.
+
+\begin{keyinsight}
+The computation-memory trade-off at work: instead of computing a
+complex nonlinear function at inference time, we precompute it for
+all possible input values and store the results in a table. The
+function's complexity (how many control points, how many spline
+segments) affects only the \emph{training} cost. The inference cost
+is always a single table lookup, regardless of the function's
+complexity.
+\end{keyinsight}
+
+
+% ----------------------------------------------------------------------------
+\section{Training the Scoring Functions}
+\label{sec:scoring-training}
+% ----------------------------------------------------------------------------
+
+The scoring functions can be trained jointly with the LGN (during
+Phase~2) or in a separate Phase~2b after the LGN is discretised.
+The latter approach is simpler:
+
+\begin{enumerate}
+  \item Discretise the LGN (fix all gate types).
+  \item For each training image, compute the popcount vector
+    $(n_0, n_1, \ldots, n_9)$ where $n_k$ is the number of output
+    gates for class $k$ that fire.
+  \item Train the scoring functions $\phi_0, \ldots, \phi_9$ on
+    these popcount vectors using cross-entropy loss and gradient
+    descent.
+  \item The only trainable parameters are the B-spline control points
+    (8--16 per function, 80--160 total for 10 classes).
+\end{enumerate}
+
+This is a tiny optimisation problem that converges in a few epochs.
+
+
+% ----------------------------------------------------------------------------
+\section{Why B-Splines and Not Polynomials?}
+\label{sec:why-splines}
+% ----------------------------------------------------------------------------
+
+One might ask: why not use a simple polynomial $\phi(x) = a_0 +
+a_1 x + a_2 x^2 + \cdots$?
+
+\begin{enumerate}
+  \item \textbf{Numerical stability:} High-degree polynomials
+    oscillate wildly (Runge's phenomenon). B-splines are locally
+    defined and stable.
+  \item \textbf{Local control:} Adjusting one control point of a
+    B-spline affects only a nearby region. Adjusting one polynomial
+    coefficient affects the entire curve.
+  \item \textbf{Discretisation quality:} A B-spline with 8 control
+    points can be sampled at, say, 64 points to create a lookup table
+    with very small approximation error. A polynomial of degree 8
+    might require more samples to capture its oscillations.
+\end{enumerate}
+
+\begin{engineernote}
+For the scoring functions in our architecture, the input is a
+popcount value in the range $[0, n_{\text{gates}}]$. With $n_{\text{gates}} = 200$
+per class, the lookup table has 201 entries. Each entry is an 8-bit
+or 16-bit integer. The total table size is $10 \times 201 \times 2 =
+4{,}020$ bytes---negligible.
+\end{engineernote}
+
+
+% ----------------------------------------------------------------------------
+\section{Summary}
+\label{sec:ch10-summary}
+% ----------------------------------------------------------------------------
+
+This chapter introduced B-splines as learnable functions that bridge
+the gap between continuous training and discrete deployment:
+
+\begin{enumerate}
+  \item The Kolmogorov--Arnold theorem~\cite{kolmogorov1957representation} guarantees that compositions
+    of univariate functions can represent any continuous mapping.
+  \item B-splines~\cite{deboor1978splines} provide smooth, locally controllable, compactly
+    parameterised univariate functions.
+  \item During training, B-splines support standard backpropagation
+    through their control points.
+  \item After training, each B-spline can be sampled and stored as a
+    lookup table---converting a continuous function into a discrete
+    memory access.
+\end{enumerate}
+
+The next chapter shows how to compile these functions into lookup
+tables and analyses the accuracy-efficiency trade-off of
+discretisation.

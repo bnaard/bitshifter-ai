@@ -1,0 +1,306 @@
+% ============================================================================
+\chapter{Assembling the Hybrid Architecture}
+\label{ch:assembly}
+% ============================================================================
+
+This chapter presents the complete hybrid architecture end-to-end. We
+walk through the full pipeline---from a raw MNIST~\cite{lecun1998mnist} image to a digit
+classification---showing exactly how data flows through each stage and
+how the three training phases produce the final model.
+
+
+% ----------------------------------------------------------------------------
+\section{The Complete Architecture}
+\label{sec:complete-arch}
+% ----------------------------------------------------------------------------
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  stage/.style={draw, rounded corners=4pt, minimum width=2.8cm,
+    minimum height=1.4cm, align=center, font=\small\sffamily,
+    line width=0.7pt},
+  data/.style={font=\scriptsize\sffamily, bitgray},
+  arr/.style={-{Stealth[length=5pt]}, thick},
+]
+  % Stages
+  \node[stage, fill=bitgray!10] (input) at (0, 0)
+    {\textbf{Input}\\$28 \times 28$ pixels};
+  \node[stage, fill=bitorange!10, draw=bitorange] (bool) at (3.8, 0)
+    {\textbf{Booleanise}\\threshold + expand};
+  \node[stage, fill=bitgreen!10, draw=bitgreen] (tm) at (7.6, 0)
+    {\textbf{Tsetlin Machine}\\5000 clauses};
+  \node[stage, fill=bitorange!10, draw=bitorange] (lgn) at (11.4, 0)
+    {\textbf{Logic Gate Net}\\16000 gates};
+  \node[stage, fill=bitpurple!10, draw=bitpurple] (lut) at (15.2, 0)
+    {\textbf{LUT Score}\\10 table reads};
+
+  % Arrows with data descriptions
+  \draw[arr] (input) -- (bool);
+  \node[data, above] at (1.9, 0.9) {784 uint8};
+
+  \draw[arr] (bool) -- (tm);
+  \node[data, above] at (5.7, 0.9) {1568 bits};
+
+  \draw[arr] (tm) -- (lgn);
+  \node[data, above] at (9.5, 0.9) {5000 bits};
+
+  \draw[arr] (lgn) -- (lut);
+  \node[data, above] at (13.3, 0.9) {10 popcounts};
+
+  % Output
+  \draw[arr] (lut) -- ++(2, 0) node[right, font=\small\sffamily\bfseries]
+    {$\hat{y} \in \{0, \ldots, 9\}$};
+  \node[data] at (16.8, 0.9) {argmax};
+
+  % Data types below
+  \node[data] at (0, -1.2) {uint8};
+  \node[data] at (3.8, -1.2) {bit};
+  \node[data] at (7.6, -1.2) {bit};
+  \node[data] at (11.4, -1.2) {bit $\to$ int};
+  \node[data] at (15.2, -1.2) {int8/16};
+\end{tikzpicture}
+\caption{The complete hybrid inference pipeline. Data types shrink or
+  remain compact at every stage. No floating-point values appear
+  anywhere.}
+\label{fig:complete-pipeline}
+\end{figure}
+
+
+% ----------------------------------------------------------------------------
+\section{Walkthrough: Classifying a Single Image}
+\label{sec:walkthrough}
+% ----------------------------------------------------------------------------
+
+Let us trace the classification of a specific MNIST image---the
+digit~``7''---through the entire pipeline.
+
+\subsection{Step 1: Booleanisation}
+
+The raw image has pixel values in $[0, 255]$. Thresholding at
+$\theta = 127$:
+
+\begin{itemize}
+  \item The horizontal top stroke (pixels at row~5, columns 8--19)
+    has values $> 200$. These become 1.
+  \item The diagonal downstroke has values $150$--$255$. These
+    become 1.
+  \item Background pixels have values $0$--$30$. These become 0.
+\end{itemize}
+
+After threshold: 784 bits. After literal expansion: 1568 bits (each
+pixel contributes $x_k$ and $\bar{x}_k$).
+
+\subsection{Step 2: Tsetlin Machine Clause Evaluation}
+
+The 1568-bit literal vector is matched against 5000 clause bitmasks
+(500 clauses per class, 10 classes).
+
+For this ``7'' image:
+\begin{itemize}
+  \item Class ``7'' has $\sim$30--50 positive clauses that fire
+    (matching the top bar, the diagonal, etc.) and $\sim$5--10
+    negative clauses that fire.
+  \item Class ``1'' might have $\sim$10--15 clauses that fire
+    (the diagonal alone is somewhat ``1''-like).
+  \item Classes ``0'', ``3'', ``8'' might have a few firing clauses.
+  \item Other classes have very few firing clauses.
+\end{itemize}
+
+The output is a 5000-bit binary vector: 1 where a clause fired, 0
+elsewhere. Typically $\sim$100--200 bits are 1 (sparse).
+
+\subsection{Step 3: Logic Gate Network}
+
+The 5000-bit clause vector passes through 4 layers of logic gates
+(16,000 gates total). Each gate reads two bits and produces one bit.
+
+The LGN combines clause outputs nonlinearly. For example:
+\begin{itemize}
+  \item Gate at layer 1: AND of clause~17 (``top horizontal bar
+    present'') and clause~204 (``no closed loop at top'')
+    $\Rightarrow$ 1 (both conditions met for ``7'').
+  \item Gate at layer 2: OR of two layer-1 outputs, combining
+    evidence from different stroke detectors.
+  \item And so on, building increasingly abstract features.
+\end{itemize}
+
+The output layer has 10 groups. The group for class ``7'' has the
+most 1-bits.
+
+\subsection{Step 4: Popcount and LUT Scoring}
+
+For each class $k$, count the 1-bits in its output group:
+$n_k = \text{popcount}(\text{group}_k)$.
+
+For our ``7'' image: $n_7 \approx 150$ (many gates fired),
+$n_1 \approx 40$, other classes lower.
+
+Each popcount indexes into the class's LUT:
+$s_k = \text{LUT}_k[n_k]$.
+
+The LUT maps the raw popcount to a calibrated score. The trained
+scoring function might boost confident predictions (high popcount)
+and suppress ambiguous ones.
+
+\subsection{Step 5: Argmax}
+
+$\hat{y} = \arg\max_k \; s_k = 7$. Correct.
+
+
+% ----------------------------------------------------------------------------
+\section{The Three Training Phases}
+\label{sec:three-phases}
+% ----------------------------------------------------------------------------
+
+\begin{table}[htbp]
+\centering
+\caption{Summary of the three training phases.}
+\label{tab:three-phases}
+\begin{tabular}{@{}clll@{}}
+  \toprule
+  \textbf{Phase} & \textbf{Component} & \textbf{Method}
+    & \textbf{Arithmetic} \\
+  \midrule
+  1 & Tsetlin Machine & Automata feedback & Integer only \\
+  2 & Logic Gate Network & Gradient descent & Floating-point \\
+  2b & Scoring functions & Gradient descent & Floating-point \\
+  3 & LUT compilation & Evaluate + quantise & One-time FP \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Phase 1: Tsetlin Machine~\cite{granmo2018tsetlin} (Chapters 5--7).}
+Train clause automata on booleanised MNIST images. The output is
+a set of clause bitmasks. Training uses only integer arithmetic
+(increment/decrement automaton states, random number generation).
+Typical duration: 20--50 epochs, a few minutes on a single CPU core.
+
+\paragraph{Phase 2: Logic Gate Network~\cite{petersen2022difflogic} (Chapters 8--9).}
+Freeze the TM. Precompute clause outputs for all training images.
+Train the LGN using softmax relaxation and temperature annealing.
+This phase \emph{does} use floating-point arithmetic (gradient
+computation, softmax, etc.). Typical duration: 30--100 epochs,
+10--30 minutes with a GPU or a few hours on CPU.
+
+\paragraph{Phase 2b: Scoring functions (Chapter 10).}
+Optionally train B-spline~\cite{deboor1978splines} scoring functions on the LGN's popcount
+outputs. Tiny optimisation problem: 80--160 parameters, converges
+in seconds.
+
+\paragraph{Phase 3: LUT compilation (Chapter 11).}
+Evaluate each scoring function at every integer input. Quantise to
+fixed-point integers. Store as lookup tables. This is a one-time
+offline computation taking milliseconds.
+
+After Phase~3, the model contains:
+\begin{itemize}
+  \item 5000 clause bitmasks (each 1568 bits) $= 980$ kB
+  \item 16,000 gate types (each 4 bits) $= 8$ kB
+  \item 16,000 wiring connections (each $\sim$13 bits) $= 26$ kB
+  \item 10 scoring LUTs ($\sim$201 entries $\times$ 2 bytes each)
+    $= 4$ kB
+  \item \textbf{Total: $\sim$1,020 kB}
+\end{itemize}
+
+
+% ----------------------------------------------------------------------------
+\section{Data Flow Summary}
+\label{sec:data-flow}
+% ----------------------------------------------------------------------------
+
+\begin{table}[htbp]
+\centering
+\caption{Data dimensions at each stage.}
+\label{tab:data-flow}
+\begin{tabular}{@{}llrl@{}}
+  \toprule
+  \textbf{Stage} & \textbf{Data type} & \textbf{Size}
+    & \textbf{Representation} \\
+  \midrule
+  Raw input & uint8 & 784 B & Pixel intensities \\
+  Booleanised & bits & 98 B & Bright/dark \\
+  Expanded literals & bits & 196 B & Feature $+$ negation \\
+  Clause outputs & bits & 625 B & Pattern detections \\
+  Gate outputs & bits & 2000 B & Composed features \\
+  Popcount scores & uint16 & 20 B & Per-class counts \\
+  LUT scores & int16 & 20 B & Calibrated scores \\
+  Prediction & uint8 & 1 B & Digit label \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+Note how the data remains compact throughout. The widest
+representation is the gate output layer at 2000 bytes (16,000 bits),
+which fits in a single L1 cache line on many architectures.
+
+
+% ----------------------------------------------------------------------------
+\section{End-to-End Pseudocode}
+\label{sec:pseudocode}
+% ----------------------------------------------------------------------------
+
+\begin{algorithm}[htbp]
+\caption{Complete hybrid inference for one MNIST image.}
+\label{alg:full-inference}
+\begin{algorithmic}[1]
+  \Require Pixel array $\bvec{p} \in [0,255]^{784}$
+  \Require Clause masks $\bvec{M} \in \{0,1\}^{5000 \times 1568}$
+  \Require Gate types $\bvec{g} \in \{0,\ldots,15\}^{16000}$
+  \Require Gate wiring $(\text{in}_1, \text{in}_2)$ for each gate
+  \Require Scoring LUTs $\text{LUT}_k$ for $k = 0, \ldots, 9$
+  \Ensure Predicted digit $\hat{y}$
+  \Statex
+  \State \textbf{// Step 1: Booleanise}
+  \For{$k = 1$ to $784$}
+    \State $x_k \leftarrow \mathbf{1}[p_k > 127]$
+    \State $\bar{x}_k \leftarrow 1 - x_k$
+  \EndFor
+  \State Pack into bit vector $\bvec{b} \in \{0,1\}^{1568}$
+  \Statex
+  \State \textbf{// Step 2: Evaluate Tsetlin Machine clauses}
+  \For{$j = 1$ to $5000$}
+    \State $c_j \leftarrow \mathbf{1}[(\bvec{M}_j \wedge \bvec{b}) = \bvec{M}_j]$
+      \Comment{Bitwise AND + compare}
+  \EndFor
+  \Statex
+  \State \textbf{// Step 3: Evaluate Logic Gate Network}
+  \State $\bvec{h}^{(0)} \leftarrow (c_1, c_2, \ldots, c_{5000})$
+  \For{each layer $l = 1, 2, \ldots, L$}
+    \For{each gate $i$ in layer $l$}
+      \State $a \leftarrow h^{(l-1)}_{\text{in}_1(i)}$;
+        $\;\; b \leftarrow h^{(l-1)}_{\text{in}_2(i)}$
+      \State $h^{(l)}_i \leftarrow \TruthTable(g_i)[2a + b]$
+        \Comment{4-entry LUT}
+    \EndFor
+  \EndFor
+  \Statex
+  \State \textbf{// Step 4: Popcount + LUT scoring}
+  \For{$k = 0$ to $9$}
+    \State $n_k \leftarrow \text{popcount}(\text{output group}_k)$
+    \State $s_k \leftarrow \text{LUT}_k[n_k]$
+  \EndFor
+  \Statex
+  \State \textbf{// Step 5: Classify}
+  \State $\hat{y} \leftarrow \arg\max_k \; s_k$
+\end{algorithmic}
+\end{algorithm}
+
+Every operation in this pseudocode is one of: integer comparison,
+bitwise AND/OR/NOT, table lookup, integer addition, or integer
+comparison. There is not a single floating-point operation.
+
+
+% ----------------------------------------------------------------------------
+\section{Summary}
+\label{sec:ch12-summary}
+% ----------------------------------------------------------------------------
+
+The assembled hybrid architecture achieves the thesis stated in
+\cref{ch:problem}: a neural network that classifies MNIST digits
+using zero floating-point operations at inference time. The model
+size is approximately 1~MB, fits in L2 cache, and processes each
+image with roughly 273,000 cheap operations.
+
+The next chapter analyses the architecture's properties in more
+detail: accuracy, speed, energy, interpretability, and limitations.

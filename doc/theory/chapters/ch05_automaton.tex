@@ -1,0 +1,379 @@
+% ============================================================================
+\chapter{The Tsetlin Automaton}
+\label{ch:automaton}
+% ============================================================================
+
+The Tsetlin Machine is built from a single, remarkably simple
+component: the \concept{Tsetlin Automaton}. This chapter introduces the
+automaton, explains its behaviour, and shows why it can learn from
+noisy feedback without any calculus.
+
+
+% ----------------------------------------------------------------------------
+\section{Finite-State Learning Automata}
+\label{sec:automata-intro}
+% ----------------------------------------------------------------------------
+
+A \concept{learning automaton} is a device that repeatedly chooses an
+action, receives feedback from its environment, and updates its
+internal state to improve future choices. The idea dates to the 1960s
+and the work of M.~L.~Tsetlin~\cite{tsetlin1961}.
+
+The simplest version has:
+\begin{itemize}
+  \item A finite set of \emph{states} (numbered 1 through $2N$ for
+    some positive integer $N$).
+  \item Two \emph{actions}: action~0 and action~1.
+  \item A rule that maps the current state to an action.
+  \item An update rule that moves the state up or down based on
+    feedback (reward or penalty).
+\end{itemize}
+
+\begin{analogy}
+Think of a physical slider on a rail, marked with positions 1 through
+$2N$. The slider starts somewhere in the middle. A ``reward'' pushes
+it toward the nearest end; a ``penalty'' pushes it toward the centre.
+Once the slider reaches an end, it tends to stay there. The two ends
+represent two different decisions, and the slider's position reflects
+the automaton's confidence in that decision.
+\end{analogy}
+
+
+% ----------------------------------------------------------------------------
+\section{The Two-Action Tsetlin Automaton}
+\label{sec:two-action}
+% ----------------------------------------------------------------------------
+
+\begin{definition}[Two-action Tsetlin Automaton with $2N$ states]
+\label{def:tsetlin-automaton}
+The automaton has states $\{1, 2, \ldots, 2N\}$ and two actions:
+\begin{equation}
+  \text{action}(s) = \begin{cases}
+    0 & \text{if } s \leq N \\
+    1 & \text{if } s > N
+  \end{cases}
+  \label{eq:action}
+\end{equation}
+
+States 1 through $N$ map to action~0 (the ``exclude'' action).
+States $N{+}1$ through $2N$ map to action~1 (the ``include'' action).
+\end{definition}
+
+The state transition rules depend on the feedback signal:
+
+\begin{description}[leftmargin=1em]
+  \item[Reward:] Move the state away from the decision boundary
+    (toward the nearest end of the rail):
+    \begin{equation}
+      s \leftarrow \begin{cases}
+        \max(1, \; s - 1) & \text{if } s \leq N \\
+        \min(2N, \; s + 1) & \text{if } s > N
+      \end{cases}
+      \label{eq:reward}
+    \end{equation}
+
+  \item[Penalty:] Move the state toward the decision boundary
+    (toward the centre):
+    \begin{equation}
+      s \leftarrow \begin{cases}
+        \min(N, \; s + 1) & \text{if } s \leq N \\
+        \max(N{+}1, \; s - 1) & \text{if } s > N
+      \end{cases}
+      \label{eq:penalty}
+    \end{equation}
+\end{description}
+
+Note that the penalty can push the state across the boundary (from
+$N{+}1$ to $N$ or vice versa), changing the action. This is how the
+automaton changes its mind.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  state/.style={circle, draw, minimum size=0.9cm, font=\small\ttfamily,
+    inner sep=0pt, line width=0.6pt},
+  action0/.style={state, fill=bitorange!15},
+  action1/.style={state, fill=bitblue!15},
+  trans/.style={-{Stealth[length=4pt]}, thick},
+  >=Stealth
+]
+  % States for N=4 (8 states)
+  \foreach \i in {1,...,4} {
+    \node[action0] (s\i) at (\i*1.6, 0) {\i};
+  }
+  \foreach \i in {5,...,8} {
+    \node[action1] (s\i) at (\i*1.6, 0) {\i};
+  }
+
+  % Decision boundary
+  \draw[dashed, thick, bitgray] (7.2, -1.2) -- (7.2, 1.2)
+    node[above, font=\scriptsize\sffamily] {boundary};
+
+  % Action labels
+  \node[font=\small\sffamily\bfseries, bitorange] at (4, -1.5)
+    {Action 0 (exclude)};
+  \node[font=\small\sffamily\bfseries, bitblue] at (10.4, -1.5)
+    {Action 1 (include)};
+
+  % Reward arrows (above)
+  \draw[trans, bitgreen] (s2.north) to[bend left=30]
+    node[above, font=\tiny\sffamily] {reward} (s1.north);
+  \draw[trans, bitgreen] (s7.north) to[bend left=30]
+    node[above, font=\tiny\sffamily] {reward} (s8.north);
+
+  % Penalty arrows (below)
+  \draw[trans, red!70] (s2.south) to[bend right=30]
+    node[below, font=\tiny\sffamily] {penalty} (s3.south);
+  \draw[trans, red!70] (s7.south) to[bend right=30]
+    node[below, font=\tiny\sffamily] {penalty} (s6.south);
+
+  % Boundary crossing
+  \draw[trans, red!70] (s5.south) to[bend right=30]
+    node[below, font=\tiny\sffamily] {penalty} (s4.south);
+\end{tikzpicture}
+\caption{A Tsetlin Automaton with $2N = 8$ states. States 1--4 map to
+  action~0 (exclude); states 5--8 map to action~1 (include). Rewards
+  push toward the ends; penalties push toward the centre boundary.
+  A penalty at state~5 crosses the boundary to state~4, flipping the
+  action from 1 to~0.}
+\label{fig:automaton}
+\end{figure}
+
+
+% ----------------------------------------------------------------------------
+\section{Why the Automaton Works: Noise Absorption}
+\label{sec:noise-absorption}
+% ----------------------------------------------------------------------------
+
+The key property of the Tsetlin Automaton is its ability to resist
+noise. Consider an automaton in state~1 (deep in the action~0 region).
+Even if it receives a few spurious penalty signals, it must be pushed
+through states 2, 3, \ldots, $N$, $N{+}1$ before it changes its
+action. The parameter $N$ controls this \concept{noise margin}: larger
+$N$ means the automaton needs more consecutive penalties to change its
+mind.
+
+\begin{keyinsight}
+The number of states $N$ per action controls the trade-off between
+\emph{stability} (resistance to noise) and \emph{agility} (speed of
+adaptation). $N = 1$ gives a memoryless flip-flop that changes on
+every penalty. Large $N$ gives a conservative automaton that changes
+slowly but reliably.
+\end{keyinsight}
+
+\begin{example}
+With $N = 100$ and the automaton in state~1, it takes at least 100
+consecutive penalties with no intervening rewards to flip the
+action. If the correct action is truly~0, the environment will
+produce more rewards than penalties, and the state will drift toward
+1 (maximum confidence). If the correct action is truly~1, the
+accumulated penalties will eventually push the state past 100 to the
+action~1 side, where rewards will then anchor it.
+\end{example}
+
+
+% ----------------------------------------------------------------------------
+\section{Convergence Guarantees}
+\label{sec:convergence}
+% ----------------------------------------------------------------------------
+
+Tsetlin~\cite{tsetlin1961} proved the following result (stated informally):
+
+\begin{theorem}[Tsetlin convergence, informal]
+\label{thm:tsetlin-convergence}
+If one action produces rewards more frequently than the other, a
+two-action Tsetlin Automaton with sufficiently many states will
+converge to the better action with probability approaching~1 as
+$N \to \infty$.
+\end{theorem}
+
+More precisely, let $r_0$ be the reward probability for action~0 and
+$r_1$ the reward probability for action~1. If $r_1 > r_0$, then the
+probability that the automaton is in an action~1 state converges to~1
+as $N \to \infty$.
+
+\begin{engineernote}
+In practice, $N$ between 50 and 200 works well for MNIST. The
+convergence is fast enough that the automaton settles within a few
+training epochs (passes through the data). The default in most
+implementations is $N = 100$, giving 200 states per automaton.
+\end{engineernote}
+
+The convergence does \emph{not} require independence between
+successive feedback signals~\cite{zhang2021convergence}. This is important because in a Tsetlin
+Machine, the feedback to each automaton depends on the current input
+pattern and the states of other automata---it is highly correlated.
+Tsetlin's original proof accommodates this, which is one reason the
+framework is robust.
+
+
+% ----------------------------------------------------------------------------
+\section{Multiple Automata Working Together}
+\label{sec:team}
+% ----------------------------------------------------------------------------
+
+A single automaton makes a single binary decision: include or exclude.
+The power of the Tsetlin Machine~\cite{granmo2018tsetlin} comes from assembling many automata
+into a \concept{team} that collectively builds a pattern detector (a
+clause).
+
+Consider a clause with 10 input features ($x_1, \ldots, x_5$ and
+their negations $\bar{x}_1, \ldots, \bar{x}_5$). We assign one
+automaton to each of the 10 literals. Each automaton independently
+decides whether its literal is ``included'' (action~1) or
+``excluded'' (action~0) from the clause.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  auto/.style={draw, rounded corners, minimum width=1.4cm,
+    minimum height=0.7cm, font=\scriptsize\sffamily, inner sep=2pt},
+  inc/.style={auto, fill=bitblue!15},
+  exc/.style={auto, fill=bitgray!10},
+  >=Stealth
+]
+  % Literals
+  \foreach \i/\lit/\act in {
+    0/$x_1$/include,
+    1/$\bar{x}_1$/exclude,
+    2/$x_2$/include,
+    3/$\bar{x}_2$/include,
+    4/$x_3$/exclude
+  } {
+    \pgfmathsetmacro{\xpos}{\i * 2.5}
+    \ifnum\i=1
+      \node[exc] (a\i) at (\xpos, 0) {\lit: \act};
+    \else\ifnum\i=4
+      \node[exc] (a\i) at (\xpos, 0) {\lit: \act};
+    \else
+      \node[inc] (a\i) at (\xpos, 0) {\lit: \act};
+    \fi\fi
+  }
+
+  % Clause output
+  \node[draw, rounded corners, fill=bitgreen!15, minimum width=2cm,
+    font=\small\sffamily\bfseries] (clause) at (5, -1.5)
+    {$C = x_1 \wedge \bar{x}_2$};
+
+  % Note
+  \node[font=\scriptsize\sffamily, bitgray] at (5, -2.3)
+    {(only included literals appear in the clause)};
+
+  % Arrows from included automata to clause
+  \draw[->, thick] (a0.south) -- (clause);
+  \draw[->, thick] (a2.south) -- (clause);
+  \draw[->, thick] (a3.south) -- (clause);
+\end{tikzpicture}
+\caption{A team of automata forming a clause. Each automaton controls
+  one literal. The clause is the AND of all included literals.
+  Here, automata for $x_1$, $x_2$, and $\bar{x}_2$ chose ``include,''
+  so $C = x_1 \wedge x_2 \wedge \bar{x}_2$. (In practice, including
+  both $x_2$ and $\bar{x}_2$ would make the clause always false---the
+  training algorithm learns to avoid this.)}
+\label{fig:automata-team}
+\end{figure}
+
+The clause output is then:
+\begin{equation}
+  C = \bigwedge_{\substack{k : \text{automaton}_k \\ \text{says include}}} \ell_k
+  \label{eq:clause-automata}
+\end{equation}
+
+The training algorithm (\cref{ch:clauses}) will adjust the automata
+states so that useful literals are included and irrelevant ones are
+excluded.
+
+
+% ----------------------------------------------------------------------------
+\section{The Automaton as a Memory Device}
+\label{sec:memory}
+% ----------------------------------------------------------------------------
+
+It is useful to think of the automaton's state as a form of memory
+that accumulates evidence. Each reward strengthens the current
+decision; each penalty weakens it. The ``depth'' of memory (controlled
+by $N$) determines how much evidence is needed before the automaton
+changes its mind.
+
+This is fundamentally different from gradient-based learning:
+\begin{itemize}
+  \item There is no gradient computation---just integer
+    increment/decrement.
+  \item There is no learning rate to tune---the step size is always
+    $\pm 1$ state.
+  \item There is no loss landscape to navigate---the automaton simply
+    drifts in the direction that gets more rewards.
+\end{itemize}
+
+\begin{keyinsight}
+The Tsetlin Automaton replaces all of gradient descent's
+machinery---differentiation, learning rates, optimisers---with a
+single operation: increment or decrement an integer. This extreme
+simplicity is what makes the Tsetlin Machine suitable for
+hardware implementation and embedded deployment~\cite{wheeldon2020pervasive}.
+\end{keyinsight}
+
+
+% ----------------------------------------------------------------------------
+\section{Stochastic Feedback and Exploration}
+\label{sec:stochastic}
+% ----------------------------------------------------------------------------
+
+In the Tsetlin Machine, feedback is often made
+\concept{stochastic}---that is, the reward or penalty is applied with
+some probability rather than deterministically. This serves two
+purposes:
+
+\begin{enumerate}
+  \item \textbf{Exploration:} Even when a clause is performing well,
+    random penalties occasionally push automata toward the boundary,
+    allowing the clause to ``try out'' different literal combinations.
+  \item \textbf{Diversity:} If all clauses received identical
+    deterministic feedback, they would converge to the same pattern.
+    Stochastic feedback introduces variation, ensuring that different
+    clauses discover different patterns.
+\end{enumerate}
+
+The probability of feedback is controlled by a parameter $s$, called
+the \concept{specificity} parameter. We will define it precisely in
+\cref{ch:clauses}, but the intuition is:
+
+\begin{itemize}
+  \item Large $s$ $\Rightarrow$ high probability of reinforcing
+    included literals $\Rightarrow$ clauses become more specific
+    (include more literals, match fewer inputs).
+  \item Small $s$ $\Rightarrow$ lower reinforcement probability
+    $\Rightarrow$ clauses stay general (fewer literals, match more
+    inputs).
+\end{itemize}
+
+\begin{engineernote}
+The specificity parameter $s$ is the single most important
+hyperparameter of the Tsetlin Machine. Typical values for MNIST are
+$s = 3.0$ to $10.0$. A good starting point is $s = 5.0$.
+\end{engineernote}
+
+
+% ----------------------------------------------------------------------------
+\section{Summary}
+\label{sec:ch5-summary}
+% ----------------------------------------------------------------------------
+
+The Tsetlin Automaton is a finite-state machine with a simple update
+rule: rewards push the state toward confidence, penalties push it
+toward uncertainty. Its key properties are:
+
+\begin{enumerate}
+  \item \textbf{Noise tolerance:} The $N$-state memory buffer filters
+    out random fluctuations.
+  \item \textbf{Guaranteed convergence:} With enough states, the
+    automaton provably finds the better action.
+  \item \textbf{No calculus:} Learning requires only integer
+    increment and decrement.
+  \item \textbf{Composability:} Teams of automata can collectively
+    learn complex pattern detectors (clauses).
+\end{enumerate}
+
+In the next chapter, we will see how the Tsetlin Machine orchestrates
+hundreds of these automata, organised into clauses, and trains them
+using a clever feedback scheme called Type~I and Type~II feedback.

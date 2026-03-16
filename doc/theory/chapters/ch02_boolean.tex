@@ -1,0 +1,391 @@
+% ============================================================================
+\chapter{Boolean Algebra and Digital Logic}
+\label{ch:boolean}
+% ============================================================================
+
+This chapter reviews the mathematics of Boolean values and logic gates.
+If you work with digital systems, much of this will be familiar---but
+we establish notation and highlight the specific concepts that the later
+chapters depend on.
+
+% ----------------------------------------------------------------------------
+\section{Bits and Boolean Values}
+\label{sec:bits}
+% ----------------------------------------------------------------------------
+
+A \concept{bit} is the smallest unit of information: it is either 0
+or~1. We write $x \in \{0, 1\}$ and call $x$ a \concept{Boolean
+variable}.
+
+A \concept{bit string} of length $n$ is an ordered sequence of $n$
+bits:
+\begin{equation}
+  \bvec{x} = (x_1, x_2, \ldots, x_n) \in \{0, 1\}^n
+  \label{eq:bitstring}
+\end{equation}
+
+For MNIST, each image will become a bit string of length 784 (one bit
+per pixel) or 1568 (including negations). Understanding how to
+manipulate bit strings efficiently is the foundation of everything that
+follows.
+
+
+% ----------------------------------------------------------------------------
+\section{The Fundamental Logic Operations}
+\label{sec:logic-ops}
+% ----------------------------------------------------------------------------
+
+Three operations form the basis of all Boolean computation:
+
+\begin{definition}[AND, OR, NOT]
+\label{def:basic-ops}
+For $a, b \in \{0, 1\}$:
+\begin{align}
+  a \wedge b \; (\text{AND}) &=
+    \begin{cases} 1 & \text{if } a = 1 \text{ and } b = 1 \\ 0 & \text{otherwise} \end{cases}
+    \label{eq:and} \\[6pt]
+  a \vee b \; (\text{OR}) &=
+    \begin{cases} 1 & \text{if } a = 1 \text{ or } b = 1 \\ 0 & \text{otherwise} \end{cases}
+    \label{eq:or} \\[6pt]
+  \bar{a} \; (\text{NOT}) &=
+    \begin{cases} 1 & \text{if } a = 0 \\ 0 & \text{if } a = 1 \end{cases}
+    \label{eq:not}
+\end{align}
+\end{definition}
+
+From these, we derive two more operations that appear constantly in this
+book:
+
+\begin{definition}[XOR and XNOR]
+\label{def:xor}
+\begin{align}
+  a \oplus b \; (\text{XOR}) &= (a \wedge \bar{b}) \vee (\bar{a} \wedge b)
+    = \begin{cases} 1 & \text{if } a \neq b \\ 0 & \text{if } a = b \end{cases}
+    \label{eq:xor} \\[6pt]
+  \overline{a \oplus b} \; (\text{XNOR}) &=
+    \begin{cases} 1 & \text{if } a = b \\ 0 & \text{if } a \neq b \end{cases}
+    \label{eq:xnor}
+\end{align}
+\end{definition}
+
+\begin{engineernote}
+XNOR is the ``equality test'' for bits. When we compare a binary weight
+with a binary input (as in Binary Neural Networks~\cite{courbariaux2016binarized, rastegari2016xnornet}), XNOR tells us
+whether they match. This will become important in \cref{ch:clauses}.
+\end{engineernote}
+
+
+% ----------------------------------------------------------------------------
+\section{Truth Tables and the 16 Two-Input Functions}
+\label{sec:truth-tables}
+% ----------------------------------------------------------------------------
+
+A \concept{truth table} exhaustively lists the output of a Boolean
+function for every possible input combination. Two binary inputs
+$(a, b)$ have $2^2 = 4$ possible combinations, so a 2-input function
+is fully described by 4 output bits.
+
+Since each of those 4 output bits can be 0 or~1, there are
+$2^4 = 16$ possible 2-input Boolean functions. We list the six most
+important ones:
+
+\begin{table}[htbp]
+\centering
+\caption{Truth tables for six key 2-input Boolean functions.
+  The 4-bit ``code'' column uniquely identifies each function
+  by its output for inputs $(0,0), (0,1), (1,0), (1,1)$.}
+\label{tab:truth-tables}
+\begin{tabular}{@{}cc|cccccc@{}}
+  \toprule
+  $a$ & $b$ & AND & OR & XOR & NAND & NOR & XNOR \\
+  \midrule
+  0 & 0 & 0 & 0 & 0 & 1 & 1 & 1 \\
+  0 & 1 & 0 & 1 & 1 & 1 & 0 & 0 \\
+  1 & 0 & 0 & 1 & 1 & 1 & 0 & 0 \\
+  1 & 1 & 1 & 1 & 0 & 0 & 0 & 1 \\
+  \midrule
+  \multicolumn{2}{c|}{4-bit code} & 0001 & 0111 & 0110 & 1110 & 1000 & 1001 \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\begin{keyinsight}
+Every 2-input Boolean function can be represented as a 4-bit number
+(its truth table outputs read as a binary code). This is how Logic
+Gate Networks encode gate types: each gate is identified by one of the
+16 possible 4-bit codes~\cite{petersen2022difflogic}. We will use this encoding extensively in
+\cref{ch:diff-gates}.
+\end{keyinsight}
+
+The complete set of 16 functions is listed in \cref{app:gates}.
+
+
+% ----------------------------------------------------------------------------
+\section{Literals and Clauses}
+\label{sec:literals-clauses}
+% ----------------------------------------------------------------------------
+
+Two concepts from propositional logic are essential for understanding
+Tsetlin Machines~\cite{granmo2018tsetlin}.
+
+\begin{definition}[Literal]
+\label{def:literal}
+Given a Boolean variable $x_k$, a \concept{literal} is either $x_k$
+(the \emph{positive literal}) or $\bar{x}_k$ (the \emph{negative
+literal}). If $x_k = 1$, then $x_k$ evaluates to 1 and $\bar{x}_k$
+evaluates to 0, and vice versa.
+\end{definition}
+
+For $n$ Boolean variables, we have $2n$ available literals.
+
+\begin{definition}[Clause]
+\label{def:clause}
+A \concept{clause} (specifically, a \emph{conjunctive clause}) is a
+logical AND of selected literals:
+\begin{equation}
+  C = \ell_1 \wedge \ell_2 \wedge \cdots \wedge \ell_m
+  \label{eq:clause-def}
+\end{equation}
+where each $\ell_i$ is a literal drawn from the available set.
+A clause outputs 1 if and only if \emph{all} its selected literals
+are simultaneously true.
+\end{definition}
+
+\begin{example}
+Consider three Boolean variables $x_1, x_2, x_3$. The clause
+$C = x_1 \wedge \bar{x}_2 \wedge x_3$
+outputs 1 only when $x_1 = 1$, $x_2 = 0$, and $x_3 = 1$.
+For all other input combinations, $C = 0$.
+\end{example}
+
+\begin{analogy}
+Think of a clause as a checklist at a factory quality control station.
+Each item on the checklist says ``this measurement must be within
+spec'' (positive literal) or ``this defect must be absent'' (negative
+literal). The product passes inspection (clause outputs~1) only if
+every single item on the checklist is satisfied.
+\end{analogy}
+
+\subsection{Clauses as Pattern Detectors}
+
+A clause with $m$ selected literals out of $2n$ available is a very
+specific pattern detector. It fires (outputs~1) only for inputs that
+match \emph{all} $m$ conditions. The more literals a clause includes,
+the more specific it becomes---firing for fewer and fewer input
+patterns.
+
+This is exactly what we want for digit recognition: a clause that
+includes literals for specific pixel positions will fire only when the
+image matches a particular pattern of bright and dark pixels.
+
+
+% ----------------------------------------------------------------------------
+\section{Bitwise Parallelism on CPUs}
+\label{sec:bitwise-parallel}
+% ----------------------------------------------------------------------------
+
+A key engineering advantage of Boolean computation is
+\concept{bitwise parallelism}. When a CPU executes an AND instruction
+on two 64-bit registers, it performs 64 independent AND operations in
+a single clock cycle.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  bit/.style={draw, minimum width=0.4cm, minimum height=0.5cm,
+    font=\tiny\ttfamily, inner sep=0pt},
+  lbl/.style={font=\small\sffamily, bitgray}
+]
+  % Register A
+  \node[lbl, left] at (-0.3, 1.5) {Reg A:};
+  \foreach \b [count=\i from 0] in {1,0,1,1,0,1,0,1,1,1,0,0,1,0,1,0} {
+    \node[bit, fill=bitblue!15] at (\i*0.45, 1.5) {\b};
+  }
+  \node[font=\tiny\sffamily, right] at (7.5, 1.5) {$\cdots$ 64 bits};
+
+  % Register B
+  \node[lbl, left] at (-0.3, 0.8) {Reg B:};
+  \foreach \b [count=\i from 0] in {1,1,0,1,0,0,1,1,0,1,1,0,0,1,0,1} {
+    \node[bit, fill=bitgreen!15] at (\i*0.45, 0.8) {\b};
+  }
+
+  % AND operation
+  \node[font=\sffamily\bfseries, bitpurple] at (3.4, 0.3) {AND};
+
+  % Result
+  \node[lbl, left] at (-0.3, -0.3) {Result:};
+  \foreach \b [count=\i from 0] in {1,0,0,1,0,0,0,1,0,1,0,0,0,0,0,0} {
+    \node[bit, fill=bitpurple!15] at (\i*0.45, -0.3) {\b};
+  }
+
+  % Clock annotation
+  \node[draw, rounded corners, fill=lightbg, font=\scriptsize\sffamily]
+    at (3.4, -1.1) {1 clock cycle for all 64 bits};
+\end{tikzpicture}
+\caption{Bitwise parallelism: one AND instruction processes 64 bit
+  positions simultaneously. With SIMD extensions (AVX-512), this
+  scales to 512~bits per instruction.}
+\label{fig:bitwise-parallel}
+\end{figure}
+
+\begin{engineernote}
+For our MNIST architecture, each image is 784~bits (after
+booleanisation). That fits in $\lceil 784 / 64 \rceil = 13$ machine
+words. Evaluating whether a clause matches an image requires 13~AND
+instructions followed by a check that all bits are set---a total of
+roughly 26~instructions. A conventional neuron with 784 floating-point
+multiply-adds requires 784~multiplications and 784~additions.
+
+The ratio is approximately $1{,}568 / 26 \approx 60\times$ fewer
+instructions per ``neuron equivalent.''
+\end{engineernote}
+
+\subsection{The Popcount Instruction}
+
+The \concept{popcount} (population count) instruction counts the
+number of 1-bits in a machine word. Most modern CPUs provide this as
+a hardware instruction.
+
+\begin{equation}
+  \popcount(10110101_2) = 5
+  \label{eq:popcount-example}
+\end{equation}
+
+Popcount is useful for:
+\begin{itemize}
+  \item Counting how many literals in a clause matched (clause
+    evaluation).
+  \item Computing Hamming distance between two bit strings (number
+    of positions where they differ).
+  \item Replacing summation: $\sum_i a_i$ for binary $a_i$ is just
+    $\popcount(\bvec{a})$.
+\end{itemize}
+
+
+% ----------------------------------------------------------------------------
+\section{Boolean Functions as Lookup Tables}
+\label{sec:bool-lut}
+% ----------------------------------------------------------------------------
+
+Any Boolean function of $n$ inputs can be represented as a table with
+$2^n$ entries---one entry for each possible input combination. This is
+the \concept{lookup table} (LUT) representation.
+
+\begin{example}
+The AND function of 2 inputs is the table:
+
+\begin{center}
+\begin{tabular}{@{}cc|c@{}}
+  \toprule
+  \textbf{Input $(a,b)$} & \textbf{Index} & \textbf{Output} \\
+  \midrule
+  $(0,0)$ & 0 & 0 \\
+  $(0,1)$ & 1 & 0 \\
+  $(1,0)$ & 2 & 0 \\
+  $(1,1)$ & 3 & 1 \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+To evaluate AND$(a,b)$, compute the index $i = 2a + b$ and return
+$\text{table}[i]$. No logic needed---just a memory read.
+\end{example}
+
+This observation---that any function can be replaced by a table---is
+the foundation of LUT compilation (\cref{ch:lut}). The trade-off is
+clear: a table of $2^n$ entries replaces $n$-input computation with a
+single memory access, but the table size grows exponentially with
+$n$. For small $n$ (2--8 inputs), this is efficient. For $n = 784$,
+it is impossible ($2^{784}$ entries).
+
+\begin{keyinsight}
+The architecture in this book uses lookup tables at two scales:
+\begin{enumerate}
+  \item \textbf{Gate level:} Each 2-input logic gate is a 4-entry
+    table (tiny, fits in a register).
+  \item \textbf{Function level:} Learned scoring functions are sampled
+    and stored as $L$-entry tables (typically $L = 64$ to $256$).
+\end{enumerate}
+The Tsetlin Machine and Logic Gate Network reduce the
+dimensionality from 784 to a manageable number of intermediate
+values, making LUT compilation tractable.
+\end{keyinsight}
+
+
+% ----------------------------------------------------------------------------
+\section{Functional Completeness}
+\label{sec:completeness}
+% ----------------------------------------------------------------------------
+
+\begin{definition}[Functional completeness]
+A set of logic operations is \concept{functionally complete} if every
+possible Boolean function can be built from that set alone.
+\end{definition}
+
+The set $\{\text{AND}, \text{OR}, \text{NOT}\}$ is functionally
+complete. More remarkably, $\{\text{NAND}\}$ alone is functionally
+complete---every Boolean function can be built from NAND gates only.
+
+This matters for our architecture because it guarantees that a network
+of logic gates (even with a limited gate vocabulary) can in principle
+represent \emph{any} Boolean classification function. The Logic Gate
+Network has access to all 16 two-input functions, which is more than
+sufficient.
+
+
+% ----------------------------------------------------------------------------
+\section{Worked Example: Classifying a Toy Image}
+\label{sec:toy-example}
+% ----------------------------------------------------------------------------
+
+Let us build intuition with a minimal example. Consider a $2 \times 2$
+image with 4 pixels, each either black (0) or white (1). We want to
+classify whether the image contains a ``diagonal stripe'' pattern.
+
+The two target patterns are:
+\begin{center}
+\begin{tikzpicture}[
+  px/.style={draw, minimum size=0.8cm, font=\small\ttfamily}
+]
+  % Pattern 1
+  \node[px, fill=bitblue!30] at (0, 0.8) {1};
+  \node[px] at (0.8, 0.8) {0};
+  \node[px] at (0, 0) {0};
+  \node[px, fill=bitblue!30] at (0.8, 0) {1};
+  \node[font=\small\sffamily, below] at (0.4, -0.4) {Pattern A};
+
+  % Pattern 2
+  \node[px] at (3, 0.8) {0};
+  \node[px, fill=bitblue!30] at (3.8, 0.8) {1};
+  \node[px, fill=bitblue!30] at (3, 0) {1};
+  \node[px] at (3.8, 0) {0};
+  \node[font=\small\sffamily, below] at (3.4, -0.4) {Pattern B};
+\end{tikzpicture}
+\end{center}
+
+\paragraph{Step 1: Define variables.}
+Let $x_1, x_2, x_3, x_4$ be the four pixel values (top-left,
+top-right, bottom-left, bottom-right).
+
+\paragraph{Step 2: Write clauses.}
+\begin{align*}
+  C_1 &= x_1 \wedge \bar{x}_2 \wedge \bar{x}_3 \wedge x_4
+    && \text{(detects Pattern A)} \\
+  C_2 &= \bar{x}_1 \wedge x_2 \wedge x_3 \wedge \bar{x}_4
+    && \text{(detects Pattern B)}
+\end{align*}
+
+\paragraph{Step 3: Combine with OR.}
+\[
+  \text{is\_diagonal}(\bvec{x}) = C_1 \vee C_2
+\]
+
+This outputs 1 if and only if the input matches either diagonal
+pattern. The entire classifier uses only AND, OR, and NOT---no
+multiplication, no floating-point arithmetic.
+
+\begin{engineernote}
+In this toy example, we hand-crafted the clauses. The power of the
+Tsetlin Machine (Part~II) is that it \emph{discovers} such clauses
+automatically from training data, without human intervention.
+\end{engineernote}

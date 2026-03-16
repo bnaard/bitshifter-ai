@@ -1,0 +1,144 @@
+% ============================================================================
+% Bitwise Digits: Theory and Design of a Hybrid Logic-Based
+% Neural Network for MNIST
+% ============================================================================
+\documentclass[11pt,a4paper,twoside,openright]{book}
+
+% --- Shared preamble ---
+\input{preamble}
+
+% --- Document metadata ---
+\title{%
+  \vspace{-2cm}
+  {\Huge\bfseries Bitwise Digits}\\[1em]
+  {\Large Theory and Design of a Hybrid Logic-Based\\
+   Neural Network for MNIST}\\[2em]
+  {\large A Practical Guide for Engineers}
+}
+\author{Bernhard Gerlach}
+\date{March 2026}
+
+% ============================================================================
+\begin{document}
+% ============================================================================
+
+\maketitle
+\thispagestyle{empty}
+
+% --- Front matter ---
+\frontmatter
+
+\chapter*{Preface}
+
+This book describes the theory and design of a neural network that uses no
+floating-point arithmetic at inference time. Instead of the
+multiply-accumulate operations that dominate modern AI, our architecture
+relies on Boolean logic, integer counting, and memory lookups---operations
+that every CPU can perform cheaply and efficiently.
+
+The architecture combines three paradigms:
+\begin{itemize}
+  \item \textbf{Tsetlin Machines} learn interpretable if--then rules using
+    simple counting automata. They form the feature extraction layer.
+  \item \textbf{Logic Gate Networks} learn which logic gates (AND, OR,
+    XOR, \ldots) best combine those features. They form the composition
+    layer.
+  \item \textbf{Lookup Table compilation} converts any remaining learned
+    functions into precomputed tables. It forms the deployment layer.
+\end{itemize}
+
+The target task is handwritten digit recognition on the MNIST dataset---a
+deliberately simple benchmark chosen to validate the approach, not to chase
+records. The implementation is in Rust.
+
+\paragraph{Who this book is for.}
+Engineers who are comfortable with university-level mathematics (linear
+algebra, basic probability, logic) but who are not specialists in machine
+learning or theoretical computer science. Every concept is introduced from
+intuition and diagrams before it is formalised.
+
+\paragraph{How to read this book.}
+Part~I builds the foundations: Boolean algebra, supervised learning, and
+data preparation. Parts~II--IV cover the three components of the hybrid
+architecture in depth. Part~V assembles everything into a complete system
+and analyses its properties. Each part is designed to be self-contained
+enough that you can read the Tsetlin chapters (Part~II) and the Logic Gate
+chapters (Part~III) in either order, provided you read both before Part~V.
+
+\paragraph{Conventions.}
+Throughout this book, coloured boxes highlight important ideas:
+\begin{keyinsight}
+Blue boxes contain key theoretical insights---the ideas that, once
+understood, make everything else click.
+\end{keyinsight}
+\begin{engineernote}
+Green boxes contain practical engineering observations---implementation
+tips, performance implications, and hardware considerations.
+\end{engineernote}
+\begin{analogy}
+Orange boxes contain analogies that map unfamiliar concepts to everyday
+experience. They sacrifice precision for intuition.
+\end{analogy}
+
+\vfill
+\noindent\textit{March 2026}
+
+\tableofcontents
+
+% --- Main matter ---
+\mainmatter
+
+% Part I: Foundations
+\part{Foundations}
+\label{part:foundations}
+
+\input{chapters/ch01_problem}
+\input{chapters/ch02_boolean}
+\input{chapters/ch03_learning}
+\input{chapters/ch04_mnist_prep}
+
+% Part II: Tsetlin Machines
+\part{Tsetlin Machines --- Learning Logic Without Gradients}
+\label{part:tsetlin}
+
+\input{chapters/ch05_automaton}
+\input{chapters/ch06_clauses}
+\input{chapters/ch07_tm_mnist}
+
+% Part III: Logic Gate Networks
+\part{Logic Gate Networks --- Learning the Circuit}
+\label{part:lgn}
+
+\input{chapters/ch08_diff_gates}
+\input{chapters/ch09_lgn_training}
+
+% Part IV: LUT Compilation
+\part{LUT Compilation --- From Functions to Tables}
+\label{part:lut}
+
+\input{chapters/ch10_splines}
+\input{chapters/ch11_lut}
+
+% Part V: The Complete System
+\part{The Complete Hybrid Architecture}
+\label{part:hybrid}
+
+\input{chapters/ch12_assembly}
+\input{chapters/ch13_analysis}
+\input{chapters/ch14_implementation}
+
+% --- Back matter ---
+\backmatter
+
+% Appendices
+\appendix
+\part*{Appendices}
+\addcontentsline{toc}{part}{Appendices}
+
+\input{chapters/appA_notation}
+\input{chapters/appB_gates}
+
+% Bibliography
+\printbibliography[heading=bibintoc]
+
+\end{document}
