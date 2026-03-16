@@ -1,0 +1,352 @@
+% ============================================================================
+\section{Foundations: From Bits to Neurons}
+\label{sec:foundations}
+% ============================================================================
+
+Before we can understand how to replace neural network arithmetic with
+bitwise operations, we need a shared vocabulary. This section builds the
+essential concepts from the ground up.
+
+% ----------------------------------------------------------------------------
+\subsection{What a CPU Actually Does Well}
+\label{sec:cpu-ops}
+% ----------------------------------------------------------------------------
+
+Every processor---from a server CPU to a tiny microcontroller---has
+a set of operations it can execute in a single clock cycle. The
+cheapest and fastest of these are \concept{bitwise logic operations}:
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  gate/.style={draw, minimum width=1.2cm, minimum height=0.8cm,
+    font=\small\ttfamily\bfseries, rounded corners=2pt},
+  bit/.style={font=\small\ttfamily},
+  >=Stealth
+]
+  % AND gate
+  \node[gate, fill=bitblue!15] (and) at (0,0) {AND};
+  \node[bit, left=0.8cm] (a1) at (and.west) {1};
+  \node[bit, left=0.8cm] (a2) at ([yshift=-0.5cm]and.west) {0};
+  \node[bit, right=0.8cm] (a3) at (and.east) {0};
+  \draw[->] (a1) -- (and.west |- a1);
+  \draw[->] (a2) -- (and.west |- a2);
+  \draw[->] (and.east) -- (a3);
+  \node[font=\scriptsize, below=0.1cm] at (and.south) {1 if both 1};
+
+  % OR gate
+  \node[gate, fill=bitgreen!15] (or) at (3.5,0) {OR};
+  \node[bit, left=0.8cm] (b1) at (or.west) {1};
+  \node[bit, left=0.8cm] (b2) at ([yshift=-0.5cm]or.west) {0};
+  \node[bit, right=0.8cm] (b3) at (or.east) {1};
+  \draw[->] (b1) -- (or.west |- b1);
+  \draw[->] (b2) -- (or.west |- b2);
+  \draw[->] (or.east) -- (b3);
+  \node[font=\scriptsize, below=0.1cm] at (or.south) {1 if either 1};
+
+  % XOR gate
+  \node[gate, fill=bitorange!15] (xor) at (7,0) {XOR};
+  \node[bit, left=0.8cm] (c1) at (xor.west) {1};
+  \node[bit, left=0.8cm] (c2) at ([yshift=-0.5cm]xor.west) {0};
+  \node[bit, right=0.8cm] (c3) at (xor.east) {1};
+  \draw[->] (c1) -- (xor.west |- c1);
+  \draw[->] (c2) -- (xor.west |- c2);
+  \draw[->] (xor.east) -- (c3);
+  \node[font=\scriptsize, below=0.1cm] at (xor.south) {1 if different};
+
+  % NOT gate
+  \node[gate, fill=bitpurple!15] (not) at (10.5,0) {NOT};
+  \node[bit, left=0.8cm] (d1) at (not.west) {1};
+  \node[bit, right=0.8cm] (d2) at (not.east) {0};
+  \draw[->] (d1) -- (not.west);
+  \draw[->] (not.east) -- (d2);
+  \node[font=\scriptsize, below=0.1cm] at (not.south) {flip the bit};
+\end{tikzpicture}
+\caption{The four fundamental logic gates. Each operates on single bits
+  and executes in one clock cycle. A 64-bit CPU applies these to 64~bits
+  simultaneously.}
+\label{fig:logic-gates}
+\end{figure}
+
+\begin{engineernote}
+When a 64-bit CPU executes an AND instruction, it performs 64
+independent AND operations in a single clock cycle. With SIMD
+extensions (SSE, AVX-512, NEON), this scales to 128, 256, or even
+512~bits at once. This massive parallelism is free---it is built
+into the hardware.
+\end{engineernote}
+
+There is one more operation that matters enormously: \concept{popcount}
+(population count). Given a string of bits, popcount counts how many
+are~1. Most modern CPUs have a dedicated popcount instruction.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  bit/.style={draw, minimum width=0.6cm, minimum height=0.6cm,
+    font=\small\ttfamily, inner sep=0pt},
+  >=Stealth
+]
+  % Bit string
+  \foreach \b [count=\i from 0] in {1,0,1,1,0,1,0,1} {
+    \ifnum\b=1
+      \def\fillcol{bitblue!20}
+    \else
+      \def\fillcol{white}
+    \fi
+    \node[bit, fill=\fillcol]
+      (b\i) at (\i*0.7, 0) {\b};
+  }
+  % Arrow
+  \draw[->, thick] (3.5*0.7, -0.5) -- (3.5*0.7, -1.2);
+  % Result
+  \node[draw, rounded corners, fill=bitblue!10, minimum width=1.5cm,
+    minimum height=0.7cm, font=\sffamily\bfseries] at (3.5*0.7, -1.7) {5};
+  \node[font=\scriptsize\sffamily, right] at (5.5*0.7, -1.7)
+    {(five 1-bits)};
+  % Label
+  \node[font=\sffamily\bfseries, above=0.3cm] at (3.5*0.7, 0.3)
+    {popcount};
+\end{tikzpicture}
+\caption{The popcount operation counts the number of set bits (1s) in
+  a binary word. Combined with XNOR, it becomes a similarity measure.}
+\label{fig:popcount}
+\end{figure}
+
+\subsection{The Cost of Arithmetic}
+\label{sec:cost-arithmetic}
+
+Not all CPU operations cost the same. \Cref{tab:op-cost} shows
+approximate energy costs for different operations in a modern 45\,nm
+chip~\cite{horowitz2014energy}.
+
+\begin{table}[htbp]
+\centering
+\caption{Energy cost of arithmetic operations (45\,nm technology).
+  Bitwise operations are 1--2 orders of magnitude cheaper than
+  floating-point multiplication.}
+\label{tab:op-cost}
+\begin{tabular}{@{}lrr@{}}
+  \toprule
+  \textbf{Operation}      & \textbf{Energy (pJ)} & \textbf{Relative Cost} \\
+  \midrule
+  Bitwise AND/OR/XOR      & 0.1                  & 1$\times$ \\
+  Integer addition (32-bit)& 0.9                  & 9$\times$ \\
+  Integer multiply (32-bit)& 3.1                  & 31$\times$ \\
+  FP addition (32-bit)     & 0.9                  & 9$\times$ \\
+  FP multiply (32-bit)     & 3.7                  & 37$\times$ \\
+  Memory access (SRAM)     & 5.0                  & 50$\times$ \\
+  Memory access (DRAM)     & 640.0                & 6400$\times$ \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\begin{keyinsight}
+The most expensive thing a chip does is not computation---it is
+\emph{moving data}. A DRAM memory access costs 6400$\times$ more
+energy than a logic gate. This is the ``memory wall,'' and it means
+that any approach which keeps data close to the logic (small models,
+local lookups) wins enormously on energy, even if it does more
+operations.
+\end{keyinsight}
+
+% ----------------------------------------------------------------------------
+\subsection{How a Traditional Neuron Works}
+\label{sec:traditional-neuron}
+% ----------------------------------------------------------------------------
+
+A single artificial neuron does three things:
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Multiply} each input $x_i$ by a learned weight $w_i$.
+  \item \textbf{Accumulate} (sum) all the products and add a bias $b$.
+  \item \textbf{Activate} by passing the sum through a nonlinear function $\sigma$.
+\end{enumerate}
+
+\begin{equation}
+  y = \sigma\!\left(\sum_{i=1}^{n} w_i \cdot x_i + b\right)
+  \label{eq:neuron}
+\end{equation}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  input/.style={circle, draw, minimum size=0.7cm, font=\small},
+  neuron/.style={circle, draw, minimum size=1.2cm, font=\small,
+    fill=bitblue!10, line width=1pt},
+  >=Stealth
+]
+  % Inputs
+  \foreach \i/\v in {1/x_1, 2/x_2, 3/x_3} {
+    \node[input] (in\i) at (0, 2-\i) {$\v$};
+  }
+  \node at (0, -1.5) {$\vdots$};
+  \node[input] (inn) at (0, -2.5) {$x_n$};
+
+  % Neuron
+  \node[neuron] (n) at (4, -0.25) {$\Sigma$};
+
+  % Activation
+  \node[draw, rounded corners, minimum width=1cm, minimum height=0.8cm,
+    fill=bitorange!10, font=\small] (act) at (6.5, -0.25) {$\sigma$};
+
+  % Output
+  \node[right=0.8cm, font=\small] (out) at (act.east) {$y$};
+
+  % Connections with weights
+  \foreach \i in {1,2,3} {
+    \draw[->, thick] (in\i) -- node[above, font=\scriptsize, sloped]
+      {$w_\i$} (n);
+  }
+  \draw[->, thick] (inn) -- node[above, font=\scriptsize, sloped]
+    {$w_n$} (n);
+
+  % Neuron to activation
+  \draw[->, thick] (n) -- (act);
+  \draw[->, thick] (act) -- (out);
+
+  % Bias
+  \draw[->, thick, dashed] (4, -2.5) -- node[right, font=\scriptsize]
+    {bias $b$} (n);
+
+  % Labels
+  \node[font=\scriptsize\sffamily, below=0.1cm, bitgray] at (2, -3.2)
+    {multiply-accumulate (MAC)};
+  \draw[decorate, decoration={brace, amplitude=5pt, mirror},
+    bitgray, thick] (0.8, -3) -- (5.2, -3);
+\end{tikzpicture}
+\caption{A traditional artificial neuron. The multiply-accumulate step
+  dominates both computation time and energy cost. Every paradigm in
+  this article replaces this step with something cheaper.}
+\label{fig:traditional-neuron}
+\end{figure}
+
+\begin{analogy}
+Think of a neuron as a judge at a talent show. Each judge gives a
+score (the input $x_i$), and each judge has a reputation weight
+($w_i$)---a famous expert's opinion counts more. The final score is
+the weighted average. The activation function is the threshold: above
+a certain score, the act goes through; below, it is rejected.
+
+The MAC approach computes this weighted average with precise
+floating-point arithmetic. The bitwise approaches we will explore
+are like replacing the nuanced scoring with a simpler system:
+thumbs-up or thumbs-down from each judge, then just counting votes.
+\end{analogy}
+
+% ----------------------------------------------------------------------------
+\subsection{What MNIST Looks Like}
+\label{sec:mnist}
+% ----------------------------------------------------------------------------
+
+The MNIST dataset~\cite{lecun1998mnist} is the standard first benchmark
+for any new neural network approach. It consists of 70,000 handwritten
+digit images (60,000 for training, 10,000 for testing), each
+28$\times$28 pixels in grayscale (values 0--255).
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[scale=0.12]
+  % Draw a stylised "3" as a pixel grid
+  \fill[bitblue!5] (0,0) rectangle (28,28);
+  \draw[bitgray!30, very thin, step=1] (0,0) grid (28,28);
+
+  % Approximate pixels for digit "3"
+  \foreach \x/\y/\c in {
+    10/24/80, 11/24/200, 12/24/255, 13/24/255, 14/24/255, 15/24/200, 16/24/80,
+    16/23/200, 17/23/255, 18/23/200,
+    17/22/200, 18/22/255,
+    16/21/200, 17/21/255,
+    14/20/200, 15/20/255, 16/20/255,
+    14/19/255, 15/19/200,
+    16/18/200, 17/18/255, 18/18/200,
+    18/17/255, 19/17/200,
+    18/16/255, 19/16/200,
+    17/15/200, 18/15/255,
+    15/14/200, 16/14/255, 17/14/255,
+    11/13/80, 12/13/200, 13/13/255, 14/13/255, 15/13/200
+  }{
+    \pgfmathsetmacro{\intensity}{\c/255*100}
+    \fill[bitblue!\intensity] (\x,\y) rectangle ++(1,1);
+  }
+
+  % Arrow
+  \draw[-{Stealth}, very thick, bitgray] (30, 14) -- (35, 14);
+
+  % Vector representation
+  \node[font=\small\sffamily, right] at (36, 22) {784 input values};
+  \draw[thick] (36, 6) -- (36, 20);
+  \foreach \y/\v in {19/0.00, 18/0.00, 17/0.31, 16/0.78, 15/1.00,
+    14/0.78, 13/\ldots, 12/0.00, 11/0.00, 10/\ldots, 9/0.85, 8/1.00, 7/0.63} {
+    \node[font=\tiny\ttfamily, right] at (37, \y) {\v};
+  }
+
+  % Arrow to output
+  \draw[-{Stealth}, very thick, bitgray] (42, 14) -- (47, 14);
+
+  % Output
+  \node[font=\sffamily, right] at (48, 22) {Output};
+  \foreach \d [count=\i from 0] in {0,1,2,3,4,5,6,7,8,9} {
+    \pgfmathsetmacro{\ypos}{20 - \i * 1.5}
+    \node[font=\small\ttfamily, right] at (48, \ypos) {\d};
+    \ifnum\d=3
+      \fill[bitgreen!60] (51, {\ypos-0.3}) rectangle (55, {\ypos+0.3});
+      \node[font=\tiny\sffamily, right] at (55, \ypos) {0.97};
+    \else
+      \fill[bitgray!15] (51, {\ypos-0.3}) rectangle (51.5, {\ypos+0.3});
+    \fi
+  }
+\end{tikzpicture}
+\caption{The MNIST task: a 28$\times$28 grayscale image is flattened
+  into 784 values (normalised to $[0,1]$), and the network must output
+  which digit (0--9) it represents. The standard floating-point
+  baseline achieves 98--99\% accuracy.}
+\label{fig:mnist}
+\end{figure}
+
+For bitwise networks, the first question is how to represent these
+pixel values as bits. The simplest approach is \concept{thresholding}:
+if a pixel is above 127, it becomes a~1; otherwise a~0. More
+sophisticated approaches use \concept{thermometer encoding} (multiple
+bits per pixel) or learned binarisation~\cite{lab2023}. We will revisit this in each
+paradigm's section.
+
+% ----------------------------------------------------------------------------
+\subsection{What ``Training'' Means}
+\label{sec:training-overview}
+% ----------------------------------------------------------------------------
+
+Training a neural network means adjusting its parameters (weights,
+thresholds, gate types, spline coefficients---depending on the paradigm)
+so that the network's outputs match the correct answers on the training
+data. In traditional networks, this uses \concept{gradient descent}:
+
+\begin{enumerate}[leftmargin=2em]
+  \item Run inputs through the network (\emph{forward pass}).
+  \item Measure how wrong the output is (\emph{loss}).
+  \item Compute how each parameter contributed to the error
+    (\emph{backward pass / backpropagation}).
+  \item Nudge each parameter a tiny step in the direction that
+    reduces the error.
+\end{enumerate}
+
+\begin{engineernote}
+Backpropagation requires that every operation in the network be
+\emph{differentiable}---that we can compute its derivative. Logic
+gates (AND, OR, XOR) are \emph{not} differentiable: their output
+jumps discretely from 0 to~1 with no smooth transition. This is
+the central challenge of bitwise neural networks, and each paradigm
+solves it differently:
+\begin{itemize}[leftmargin=1em]
+  \item BNNs use the ``straight-through estimator''~\cite{bengio2013ste}---pretend the
+    derivative exists.
+  \item Tsetlin Machines~\cite{granmo2018tsetlin} avoid gradients entirely, using reinforcement
+    learning.
+  \item LGNs~\cite{petersen2022difflogic} use a continuous relaxation that converges to discrete
+    gates.
+  \item KANs train in continuous space and discretise only at
+    deployment.
+\end{itemize}
+\end{engineernote}
+
+With this foundation, we are ready to explore each paradigm in detail.

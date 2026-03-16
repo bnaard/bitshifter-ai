@@ -1,0 +1,167 @@
+% ============================================================================
+\section{Comparing the Four Paradigms}
+\label{sec:comparison}
+% ============================================================================
+
+With all four paradigms introduced, we can now compare them
+systematically. \Cref{tab:paradigm-comparison} provides a side-by-side
+summary, and the radar chart in \cref{fig:radar} visualises the
+trade-offs.
+
+\begin{table}[htbp]
+\centering
+\caption{Side-by-side comparison of the four bitwise AI paradigms
+  on key engineering criteria~\cite{courbariaux2016bnn, granmo2018tsetlin, petersen2022difflogic, liu2024kan}. Ratings: \textbf{H}igh, \textbf{M}edium,
+  \textbf{L}ow.}
+\label{tab:paradigm-comparison}
+\small
+\begin{tabular}{@{}p{2.8cm}cccc@{}}
+  \toprule
+  \textbf{Criterion} & \textbf{BNN} & \textbf{Tsetlin} &
+    \textbf{LGN} & \textbf{KAN/LUT} \\
+  \midrule
+  MNIST accuracy & 98.6\% & 99.4\% & 98.1\% & 98.0\% \\
+  Inference ops & XNOR+pop & AND+count & gate eval & LUT read \\
+  Training method & STE+backprop & Automata & Backprop & Backprop \\
+  Needs FP at train? & Yes & No & Yes & Yes \\
+  Needs FP at inference? & BatchNorm & No & No & No \\
+  Model size & Very small & Medium & Small & Configurable \\
+  Interpretability & Low & High & Medium & Low \\
+  Hardware mapping & Good & Good & Excellent & Excellent \\
+  Maturity & High & Medium & Low & Low \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[scale=1.2]
+  % Axis angles: 90, 30, -30, -90, -150, 150
+  % Grid pentagons
+  \foreach \level in {1,2,3,4,5} {
+    \draw[bitgray!30]
+      (90:\level*0.7) -- (30:\level*0.7) -- (-30:\level*0.7) --
+      (-90:\level*0.7) -- (-150:\level*0.7) -- (150:\level*0.7) -- cycle;
+  }
+
+  % Axes
+  \foreach \angle in {90, 30, -30, -90, -150, 150} {
+    \draw[bitgray!50] (0,0) -- (\angle:3.5);
+  }
+
+  % Labels
+  \node[font=\scriptsize\sffamily] at (90:4.2)   {Accuracy};
+  \node[font=\scriptsize\sffamily] at (30:4.2)   {Speed};
+  \node[font=\scriptsize\sffamily] at (-30:4.2)  {Model Size};
+  \node[font=\scriptsize\sffamily] at (-90:4.2)  {Interpretability};
+  \node[font=\scriptsize\sffamily] at (-150:4.2) {Maturity};
+  \node[font=\scriptsize\sffamily] at (150:4.2)  {Hardware Fit};
+
+  % BNN (blue)
+  \draw[thick, bitblue, fill=bitblue!10, fill opacity=0.3]
+    (90:3.5) -- (30:3.5) -- (-30:3.5) --
+    (-90:0.7) -- (-150:3.5) -- (150:2.8) -- cycle;
+
+  % Tsetlin (green)
+  \draw[thick, bitgreen, fill=bitgreen!10, fill opacity=0.3]
+    (90:3.5) -- (30:2.1) -- (-30:2.1) --
+    (-90:3.5) -- (-150:2.1) -- (150:2.8) -- cycle;
+
+  % LGN (orange)
+  \draw[thick, bitorange, fill=bitorange!10, fill opacity=0.3]
+    (90:2.8) -- (30:3.5) -- (-30:3.5) --
+    (-90:2.1) -- (-150:1.4) -- (150:3.5) -- cycle;
+
+  % KAN/LUT (purple)
+  \draw[thick, bitpurple, fill=bitpurple!10, fill opacity=0.3]
+    (90:2.8) -- (30:2.8) -- (-30:2.1) --
+    (-90:0.7) -- (-150:1.4) -- (150:3.5) -- cycle;
+
+  % Legend
+  \node[font=\scriptsize\sffamily, bitblue, right] at (4, 2.5)
+    {--- BNN};
+  \node[font=\scriptsize\sffamily, bitgreen, right] at (4, 2.0)
+    {--- Tsetlin};
+  \node[font=\scriptsize\sffamily, bitorange, right] at (4, 1.5)
+    {--- LGN};
+  \node[font=\scriptsize\sffamily, bitpurple, right] at (4, 1.0)
+    {--- KAN/LUT};
+\end{tikzpicture}
+\caption{Radar chart comparing the four paradigms across six
+  engineering criteria. No single paradigm dominates all axes---each
+  has distinct strengths. A hybrid approach aims to combine the best
+  of each.}
+\label{fig:radar}
+\end{figure}
+
+\subsection{Key Observations}
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{No single winner.} BNNs~\cite{courbariaux2016bnn} lead on speed and maturity,
+    Tsetlin~\cite{granmo2018tsetlin} leads on interpretability, LGNs~\cite{petersen2022difflogic} lead on hardware mapping,
+    and KAN/LUT~\cite{liu2024kan} leads on training accuracy. A hybrid is natural.
+
+  \item \textbf{All achieve $>$96\% on MNIST.} The accuracy differences
+    are small for this dataset. The real differentiators are speed,
+    model size, and deployment flexibility.
+
+  \item \textbf{Tsetlin is the only paradigm that avoids
+    floating-point during training.} All others require standard
+    backpropagation with 32-bit floats during the training phase,
+    switching to integer/bitwise operations only at inference.
+
+  \item \textbf{LGN and KAN/LUT are the most hardware-native.}
+    Both produce inference graphs that map directly to FPGA lookup
+    tables or ASIC logic~\cite{polylut2023, bnnfpga2025}, with no residual floating-point operations
+    (unlike BNNs, which typically need floating-point batch
+    normalisation).
+
+  \item \textbf{Interpretability is inversely correlated with
+    flexibility.} Tsetlin clauses are human-readable rules;
+    BNN and KAN/LUT weights are opaque. LGNs are in between---the
+    circuit structure is inspectable but not intuitive.
+\end{enumerate}
+
+\subsection{The Computation--Memory Spectrum}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth]
+  % Axis
+  \draw[->, thick] (0, 0) -- (13, 0)
+    node[right, font=\small\sffamily] {Memory per connection};
+  \draw[->, thick] (0, 0) -- (0, 5)
+    node[above, font=\small\sffamily, align=center] {Computation\\per connection};
+
+  % Paradigms
+  \node[draw, circle, fill=bitblue!30, minimum size=1cm,
+    font=\scriptsize\sffamily\bfseries] (bnn) at (1.5, 4) {BNN};
+  \node[draw, circle, fill=bitgreen!30, minimum size=1cm,
+    font=\scriptsize\sffamily\bfseries] (tm) at (4, 2.5) {TM};
+  \node[draw, circle, fill=bitorange!30, minimum size=1cm,
+    font=\scriptsize\sffamily\bfseries] (lgn) at (6.5, 1.5) {LGN};
+  \node[draw, circle, fill=bitpurple!30, minimum size=1cm,
+    font=\scriptsize\sffamily\bfseries] (kan) at (10, 0.8) {KAN};
+
+  % Annotations
+  \node[font=\scriptsize\sffamily, bitgray, below=0.3cm] at (bnn)
+    {1 bit/weight};
+  \node[font=\scriptsize\sffamily, bitgray, below=0.3cm] at (tm)
+    {$2N$ states/literal};
+  \node[font=\scriptsize\sffamily, bitgray, below=0.3cm] at (lgn)
+    {16 probs/node};
+  \node[font=\scriptsize\sffamily, bitgray, below=0.3cm, align=center]
+    at (kan) {$L$ table entries\\per edge};
+
+  % Trade-off arrow
+  \draw[->, thick, dashed, bitpurple!60]
+    (2, 3.8) to[bend right=15] (9.5, 1.2);
+  \node[font=\scriptsize\sffamily, bitpurple, rotate=-25] at (6, 3)
+    {Trade computation for memory};
+\end{tikzpicture}
+\caption{The computation--memory spectrum. Moving from BNNs to KAN/LUTs,
+  each connection stores more information but requires less computation
+  at inference time. This is the classic computer science trade-off
+  applied to neural network design.}
+\label{fig:compute-memory}
+\end{figure}

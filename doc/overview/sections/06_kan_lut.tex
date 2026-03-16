@@ -1,0 +1,359 @@
+% ============================================================================
+\section{Paradigm 4: Kolmogorov-Arnold Networks and LUT Compilation}
+\label{sec:kan}
+% ============================================================================
+
+% --- Intuition ---
+\subsection{The Idea in Plain English}
+
+The three paradigms we have seen so far all simplify the neuron: strip
+it down to binary operations and accept some accuracy loss. This
+fourth paradigm does the opposite during training: it makes each
+connection \emph{more} complex than a traditional weight. Then, once
+training is done, it compiles that complexity into a simple lookup
+table.
+
+\begin{analogy}
+Imagine learning to cook a complex sauce. At first, you follow an
+elaborate recipe (training): you measure precisely, taste repeatedly,
+adjust seasoning. Once you have perfected it, you write down just
+the final quantities on an index card (lookup table). Now you can
+recreate the sauce by just reading the card---no skill required,
+just follow the numbers. The complexity happened once; the
+deployment is trivial.
+\end{analogy}
+
+The ``elaborate recipe'' is a \concept{Kolmogorov-Arnold Network}
+(KAN)~\cite{liu2024kan}, where every connection is a learnable curve (B-spline). The
+``index card'' is a \concept{lookup table} (LUT), where the curve is
+sampled at fixed points and stored in memory.
+
+% --- Mechanism ---
+\subsection{The Kolmogorov-Arnold Theorem}
+
+KANs are grounded in a mathematical theorem from 1957~\cite{kolmogorov1957}. In plain
+terms:
+
+\begin{keyinsight}[title={Kolmogorov-Arnold Representation Theorem~\cite{kolmogorov1957}}]
+\emph{Any} continuous function of multiple variables can be written as
+a composition of continuous functions of \emph{one} variable and
+addition. You never need multiplication of two variables---just
+clever single-variable functions and sums.
+\end{keyinsight}
+
+Formally, for any continuous function $f : [0,1]^n \to \mathbb{R}$:
+\begin{equation}
+  f(x_1, \ldots, x_n) = \sum_{q=0}^{2n}
+    \Phi_q\!\left(\sum_{p=1}^{n} \phi_{q,p}(x_p)\right)
+  \label{eq:ka-theorem}
+\end{equation}
+
+where $\phi_{q,p}$ and $\Phi_q$ are continuous single-variable
+functions. The theorem says these functions exist but does not tell
+us what they look like---the network learns them.
+
+\subsection{How a KAN Layer Works}
+
+\subsubsection{Traditional MLP: Fixed Activations, Learnable Weights}
+
+Recall that in a standard MLP, each connection has a single number
+(weight), and the activation function is the same for all neurons in
+a layer:
+
+\begin{equation}
+  \text{MLP layer: } \bm{y} = \sigma(\bm{W}\bm{x} + \bm{b})
+  \label{eq:mlp-layer}
+\end{equation}
+
+\subsubsection{KAN: Learnable Activations, No Weights}
+
+A KAN~\cite{liu2024kan} \emph{replaces} the weight-then-activate pattern. Each edge has
+its own learnable function $\phi_{i,j}$. Nodes just sum:
+
+\begin{equation}
+  \text{KAN layer: } y_i = \sum_{j=1}^{n} \phi_{i,j}(x_j)
+  \label{eq:kan-layer}
+\end{equation}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  node/.style={draw, circle, minimum size=0.7cm, font=\small, inner sep=0pt},
+  >=Stealth
+]
+  % --- MLP side ---
+  \node[font=\sffamily\bfseries] at (2, 4.5) {MLP};
+
+  % Input
+  \foreach \i in {1,2,3} {
+    \node[node, fill=lightbg] (mi\i) at (0, 3-\i) {$x_\i$};
+  }
+  % Output
+  \foreach \i in {1,2} {
+    \node[node, fill=bitblue!15] (mo\i) at (4, 2.5-\i) {$\sigma$};
+  }
+  % Connections (straight lines = scalar weights)
+  \foreach \i in {1,2,3} {
+    \foreach \j in {1,2} {
+      \draw[->, thick, bitgray] (mi\i) -- (mo\j)
+        node[midway, font=\tiny, fill=white, inner sep=1pt] {$w$};
+    }
+  }
+
+  % --- KAN side ---
+  \node[font=\sffamily\bfseries] at (9, 4.5) {KAN};
+
+  % Input
+  \foreach \i in {1,2,3} {
+    \node[node, fill=lightbg] (ki\i) at (7, 3-\i) {$x_\i$};
+  }
+  % Output
+  \foreach \i in {1,2} {
+    \node[node, fill=bitorange!15] (ko\i) at (11, 2.5-\i) {$\Sigma$};
+  }
+  % Connections (wavy lines = learnable functions)
+  \foreach \i in {1,2,3} {
+    \foreach \j in {1,2} {
+      \draw[->, thick, bitorange, decorate,
+        decoration={snake, amplitude=1.5pt, segment length=8pt}]
+        (ki\i) -- (ko\j)
+        node[midway, font=\tiny, fill=white, inner sep=1pt] {$\phi$};
+    }
+  }
+
+  % Labels
+  \node[font=\scriptsize\sffamily, bitgray, align=center] at (2, -1.5)
+    {Scalar weights on edges\\Fixed activation on nodes};
+  \node[font=\scriptsize\sffamily, bitgray, align=center] at (9, -1.5)
+    {Learnable functions on edges\\Simple summation on nodes};
+\end{tikzpicture}
+\caption{MLP vs KAN architecture. In an MLP (left), edges carry scalar
+  weights and nodes apply a fixed activation. In a KAN (right), edges
+  carry learnable functions (B-splines) and nodes simply sum. The wavy
+  lines represent that each connection is an entire curve, not a single
+  number.}
+\label{fig:mlp-vs-kan}
+\end{figure}
+
+\subsubsection{B-Spline Functions}
+
+Each edge function $\phi_{i,j}$ is parameterised as a B-spline with
+$G$ grid points and order $k$ (typically $k=3$, cubic). The function
+is:
+\begin{equation}
+  \phi_{i,j}(x) = w_b \cdot \operatorname{SiLU}(x)
+    + w_s \cdot \sum_{m=0}^{G+k} c_m \cdot B_m^k(x)
+  \label{eq:kan-spline}
+\end{equation}
+
+where $B_m^k$ are B-spline basis functions, $c_m$ are learnable
+coefficients, and $w_b, w_s$ are scaling factors.
+
+\begin{engineernote}
+A B-spline is just a smooth, piecewise polynomial curve controlled
+by a set of ``control points'' (the coefficients $c_m$). If you have
+used Bézier curves in graphics, B-splines are their generalisation.
+The grid determines where the curve's ``knots'' are---points where
+one polynomial piece ends and the next begins.
+\end{engineernote}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+  \begin{axis}[
+    width=10cm, height=5cm,
+    xlabel={Input $x$}, ylabel={$\phi(x)$},
+    grid=major, grid style={bitgray!20},
+    xmin=-2, xmax=2, ymin=-1.5, ymax=2,
+    axis lines=middle,
+    every axis label/.style={font=\small\sffamily},
+    tick label style={font=\tiny}
+  ]
+    % A sample spline-like function
+    \addplot[thick, bitblue, smooth, domain=-2:2, samples=100]
+      {0.3*x + 0.5*sin(deg(2*x)) + 0.2*cos(deg(3*x))};
+    \addlegendentry{Learned $\phi_{i,j}(x)$}
+
+    % Grid points
+    \foreach \gp in {-2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2} {
+      \addplot[only marks, mark=|, mark size=3pt, bitgray]
+        coordinates {(\gp, -1.5)};
+    }
+
+    % ReLU for comparison
+    \addplot[thick, bitorange, dashed, domain=-2:2, samples=50]
+      {max(0, x)};
+    \addlegendentry{Fixed ReLU (MLP)}
+  \end{axis}
+
+  % Grid label
+  \node[font=\scriptsize\sffamily, bitgray] at (1, -0.3)
+    {Grid points (knots)};
+\end{tikzpicture}
+\caption{A learnable B-spline activation (blue) vs.\ a fixed ReLU
+  (orange dashed). The B-spline can learn arbitrary shapes, capturing
+  complex input--output relationships that a ReLU cannot. The grid
+  points (tick marks at bottom) define the spline's resolution.}
+\label{fig:kan-spline}
+\end{figure}
+
+% --- LUT Compilation ---
+\subsection{From Splines to Lookup Tables}
+\label{sec:lut-compilation}
+
+Here is where the computation-memory trade-off becomes concrete. After
+training, each spline function $\phi_{i,j}(x)$ is a fixed curve. We
+can \emph{compile} it:
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Sample} the spline at $L$ evenly spaced points.
+  \item \textbf{Quantise} the output values to a fixed-point format
+    (e.g., int8).
+  \item \textbf{Store} the $L$ values in an array---the lookup table.
+  \item At inference, \textbf{look up} the nearest entry (or
+    interpolate between two adjacent entries).
+\end{enumerate}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth]
+  % Spline
+  \begin{scope}
+    \node[font=\small\sffamily\bfseries] at (2.5, 3.5) {Trained Spline};
+    \draw[thick, bitblue, smooth] plot coordinates
+      {(0,1) (0.5,1.8) (1,2.5) (1.5,2.2) (2,1.5) (2.5,0.8)
+       (3,1.2) (3.5,2.0) (4,2.3) (4.5,1.9) (5,1.0)};
+    \draw[bitgray!50] (0, 0) -- (5, 0);
+    \draw[bitgray!50] (0, 0) -- (0, 3);
+  \end{scope}
+
+  % Arrow
+  \draw[->, very thick, bitgray] (5.5, 1.5) -- (7, 1.5)
+    node[midway, above, font=\scriptsize\sffamily] {sample \&};
+  \node[font=\scriptsize\sffamily, bitgray] at (6.25, 1.1) {quantise};
+
+  % LUT
+  \begin{scope}[xshift=7.5cm]
+    \node[font=\small\sffamily\bfseries] at (2, 3.5) {Lookup Table};
+    \foreach \i/\v/\q in {0/1.0/25, 1/1.8/45, 2/2.5/63,
+      3/2.2/56, 4/1.5/38, 5/0.8/20, 6/1.2/30, 7/2.0/51,
+      8/2.3/58, 9/1.9/48, 10/1.0/25} {
+      \pgfmathsetmacro{\ypos}{2.8 - \i * 0.27}
+      \node[draw, minimum width=0.8cm, minimum height=0.25cm,
+        font=\tiny\ttfamily, fill=bitblue!10, inner sep=0pt]
+        at (1.5, \ypos) {\q};
+      \node[font=\tiny\ttfamily, bitgray, left] at (0.9, \ypos) {[\i]};
+    }
+    \node[font=\scriptsize\sffamily, bitgray] at (2, -0.4)
+      {int8 values};
+  \end{scope}
+
+  % Usage arrow
+  \draw[->, thick, bitgreen] (11, 2) -- (12.5, 2);
+  \node[font=\scriptsize\sffamily, bitgreen] at (11.75, 2.4) {index};
+
+  % Inference
+  \begin{scope}[xshift=13cm]
+    \node[font=\small\sffamily\bfseries] at (1, 3.5) {Inference};
+    \node[draw, rounded corners, fill=bitgreen!10,
+      font=\scriptsize\sffamily, align=center, minimum width=2cm]
+      at (1, 2) {Input $x$\\$\downarrow$\\table[\texttt{idx}]\\$\downarrow$\\Output};
+    \node[font=\scriptsize\sffamily, bitgray, align=center] at (1, -0.2)
+      {One memory\\read};
+  \end{scope}
+\end{tikzpicture}
+\caption{LUT compilation: a trained B-spline (left) is sampled at
+  regular intervals and quantised to int8 values (centre). At
+  inference, evaluating the function becomes a single array index
+  operation (right)---no arithmetic needed.}
+\label{fig:lut-compilation}
+\end{figure}
+
+\begin{keyinsight}
+After LUT compilation, the entire ``activation function'' is a single
+memory read. The spline's mathematical complexity exists only during
+training. At deployment, every edge in the network costs exactly one
+table lookup---a cost comparable to a single bitwise operation on
+most hardware.
+\end{keyinsight}
+
+% --- ULEEN ---
+\subsection{ULEEN: The Extreme Case}
+\label{sec:uleen}
+
+The \concept{Ultra-Low-Energy Edge Neural Network}
+(ULEEN)~\cite{uleen2023} takes the LUT idea to its logical extreme:
+the entire network is just tables. No splines, no arithmetic, not even
+during training. The input features are grouped, each group indexes
+into a table, and the outputs are summed.
+
+\begin{table}[htbp]
+\centering
+\caption{ULEEN results on MNIST.}
+\label{tab:uleen}
+\begin{tabular}{@{}lr@{}}
+  \toprule
+  \textbf{Metric} & \textbf{Value} \\
+  \midrule
+  Accuracy          & 96.2\% \\
+  Model size         & 16.9\,kB \\
+  Inference latency  & 0.21\,$\mu$s \\
+  Throughput         & 14.3\,M inferences/s \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+% --- Formalisation ---
+\subsection{Mathematical Summary}
+\label{sec:kan-math}
+
+A KAN layer $\Phi$ mapping $\mathbb{R}^{n_\text{in}}$ to
+$\mathbb{R}^{n_\text{out}}$ is defined by a matrix of univariate
+functions:
+\begin{equation}
+  \Phi = \{\phi_{i,j}\}_{1 \leq i \leq n_\text{out},\;
+    1 \leq j \leq n_\text{in}}
+  \label{eq:kan-matrix}
+\end{equation}
+
+The layer computation is:
+\begin{equation}
+  y_i = \sum_{j=1}^{n_\text{in}} \phi_{i,j}(x_j),
+  \quad i = 1, \ldots, n_\text{out}
+  \label{eq:kan-layer-formal}
+\end{equation}
+
+Each function has $G + k + 2$ learnable parameters (B-spline
+coefficients plus scaling), compared to 1 parameter per edge in an MLP.
+A KAN layer with width $n$ and grid size $G$ has $O(n^2 (G+k))$
+parameters vs.\ $O(n^2)$ for an MLP layer.
+
+After LUT compilation with $L$ samples per function, each
+$\phi_{i,j}$ is replaced by:
+\begin{equation}
+  \hat{\phi}_{i,j}(x) = \operatorname{table}_{i,j}
+    \!\left[\operatorname{round}\!\left(\frac{x - x_{\min}}
+    {x_{\max} - x_{\min}} \cdot (L-1)\right)\right]
+  \label{eq:lut-eval}
+\end{equation}
+
+This is an $O(1)$ memory access, reducing inference to
+$n_\text{in} \times n_\text{out}$ table lookups plus
+$n_\text{out}$ integer additions per layer.
+
+\subsection{Strengths and Limitations}
+
+\begin{description}[leftmargin=1em]
+  \item[Strengths:]
+    Theoretically grounded (Kolmogorov-Arnold theorem~\cite{kolmogorov1957}), highest
+    accuracy among bitwise-deployable approaches, LUT compilation
+    enables zero-arithmetic inference, naturally maps to FPGA LUT
+    fabric~\cite{polylut2023, lutkan2025}, graceful accuracy-memory trade-off (more table entries
+    = more accuracy).
+
+  \item[Limitations:]
+    Training is slow ($\sim$10$\times$ slower than MLP with same
+    parameter count), requires floating-point during training,
+    LUT size grows with input precision and grid resolution,
+    relatively new (2024--2025) with evolving best practices.
+\end{description}

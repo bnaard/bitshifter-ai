@@ -1,0 +1,246 @@
+% ============================================================================
+\section{Paradigm 1: Binary Neural Networks}
+\label{sec:bnn}
+% ============================================================================
+
+% --- Intuition ---
+\subsection{The Idea in Plain English}
+
+Imagine you have a row of light switches, each either on or off. Now
+imagine a second row---a ``template'' of the ideal pattern for the
+digit~3. To check how well they match, you simply compare them
+switch by switch: same position = match, different position = mismatch.
+Count the matches, and you have a similarity score. No multiplication
+needed.
+
+This is exactly what a Binary Neural Network does~\cite{courbariaux2016bnn}. It forces both the
+inputs and the weights to be binary ($+1$ or $-1$), then measures
+similarity using \bitop{XNOR} (same = 1, different = 0) and
+\bitop{popcount} (count the 1s).
+
+\begin{analogy}
+If a traditional neuron is a panel of judges giving scores from 1 to
+10 and computing a weighted average, a binary neuron is a panel voting
+yes/no and counting hands. You lose nuance, but the counting is
+\emph{incredibly} fast.
+\end{analogy}
+
+% --- Mechanism ---
+\subsection{How It Works}
+
+\subsubsection{Step 1: Binarise the Weights}
+
+During training, the network maintains full-precision (32-bit floating
+point) ``shadow'' weights. At each forward pass, these are snapped to
+binary using the sign function:
+
+\begin{equation}
+  w_b = \operatorname{sign}(w) =
+  \begin{cases}
+    +1 & \text{if } w \geq 0 \\
+    -1 & \text{if } w < 0
+  \end{cases}
+  \label{eq:sign}
+\end{equation}
+
+\subsubsection{Step 2: Binarise the Inputs}
+
+Similarly, activations (layer outputs) are binarised. For MNIST, the
+raw pixels can be thresholded directly: pixel value $> 127$ becomes
+$+1$, otherwise $-1$.
+
+\subsubsection{Step 3: Replace Multiply with XNOR}
+
+The key mathematical identity that makes BNNs work:
+
+\begin{keyinsight}
+When both operands are in $\{-1, +1\}$, multiplication is equivalent
+to the XNOR operation:
+\[
+  a \cdot b = \operatorname{XNOR}(a, b) \quad
+  \text{where } +1 \leftrightarrow 1, \quad -1 \leftrightarrow 0
+\]
+Two values that are the same multiply to $+1$ (XNOR = 1); two
+values that differ multiply to $-1$ (XNOR = 0).
+\end{keyinsight}
+
+\subsubsection{Step 4: Replace Sum with Popcount}
+
+The sum of $n$ XNOR results (each 0 or~1) equals the number of
+matches. If $p$ is the popcount and $n$ is the total number of bits:
+\begin{equation}
+  \sum_{i=1}^{n} w_i \cdot x_i = 2 \cdot \operatorname{popcount}
+    (\operatorname{XNOR}(\bm{w}, \bm{x})) - n
+  \label{eq:xnor-popcount}
+\end{equation}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  bit/.style={draw, minimum width=0.55cm, minimum height=0.55cm,
+    font=\scriptsize\ttfamily, inner sep=0pt},
+  lbl/.style={font=\small\sffamily, bitgray},
+  >=Stealth
+]
+  % Input bits
+  \node[lbl, left] at (-0.5, 2) {Input $\bm{x}$:};
+  \foreach \b [count=\i from 0] in {1,0,1,1,0,1,1,0} {
+    \ifnum\b=1
+      \def\fillcol{bitblue!20}
+    \else
+      \def\fillcol{white}
+    \fi
+    \node[bit, fill=\fillcol]
+      (x\i) at (\i*0.65, 2) {\b};
+  }
+
+  % Weight bits
+  \node[lbl, left] at (-0.5, 1) {Weight $\bm{w}$:};
+  \foreach \b [count=\i from 0] in {1,1,1,0,0,1,0,0} {
+    \ifnum\b=1
+      \def\fillcol{bitgreen!20}
+    \else
+      \def\fillcol{white}
+    \fi
+    \node[bit, fill=\fillcol]
+      (w\i) at (\i*0.65, 1) {\b};
+  }
+
+  % XNOR result
+  \node[lbl, left] at (-0.5, 0) {XNOR:};
+  \foreach \b [count=\i from 0] in {1,0,1,0,1,1,0,1} {
+    \ifnum\b=1
+      \def\fillcol{bitorange!25}
+    \else
+      \def\fillcol{bitorange!5}
+    \fi
+    \node[bit, fill=\fillcol]
+      (r\i) at (\i*0.65, 0) {\b};
+  }
+
+  % Arrows
+  \foreach \i in {0,...,7} {
+    \draw[->, thin, bitgray] (\i*0.65, 1.65) -- (\i*0.65, 0.35);
+  }
+
+  % Popcount
+  \draw[->, thick] (5.5, 0) -- (7, 0) -- (7, -0.8);
+  \node[draw, rounded corners, fill=bitorange!10, minimum width=2cm,
+    minimum height=0.6cm, font=\small\sffamily] (pc) at (7, -1.3)
+    {popcount = \textbf{5}};
+
+  % Final result
+  \draw[->, thick] (7, -1.7) -- (7, -2.5);
+  \node[draw, rounded corners, fill=bitblue!10, minimum width=3cm,
+    font=\small\sffamily] at (7, -3)
+    {$2 \times 5 - 8 = \mathbf{+2}$};
+
+  % Annotation
+  \node[font=\scriptsize\sffamily, bitgray, right] at (8.5, -3)
+    {(equivalent to dot product)};
+\end{tikzpicture}
+\caption{A binary neuron in action. Eight input bits are compared with
+  eight weight bits using XNOR. The popcount of the result (5 matches
+  out of 8) is converted to a signed dot product: $2 \times 5 - 8 = +2$.
+  On a 64-bit CPU, this processes 64~inputs in two instructions.}
+\label{fig:bnn-computation}
+\end{figure}
+
+% --- Training ---
+\subsection{The Training Problem and the Straight-Through Estimator}
+
+The sign function (\cref{eq:sign}) has zero derivative almost
+everywhere and is undefined at zero. This means backpropagation
+cannot flow through it---gradients vanish.
+
+The pragmatic solution is the \concept{straight-through estimator}
+(STE)~\cite{bengio2013ste}: during the backward pass, \emph{pretend}
+the sign function is the identity function ($\frac{\partial w_b}
+{\partial w} \approx 1$). The gradient passes through unchanged, and
+the full-precision shadow weights are updated normally.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth]
+  % Forward
+  \draw[->, thick, bitblue] (0, 0.3) -- (6, 0.3)
+    node[midway, above, font=\small\sffamily] {Forward pass};
+  \node[font=\scriptsize\sffamily] at (1.5, 0.8) {float weights};
+  \draw[->, thick] (3, 0.8) -- (3, 0.45);
+  \node[draw, fill=bitblue!10, rounded corners, font=\scriptsize\sffamily]
+    at (3, 1.2) {sign()};
+  \node[font=\scriptsize\sffamily] at (4.5, 0.8) {binary weights};
+
+  % Backward
+  \draw[<-, thick, bitorange] (0, -0.3) -- (6, -0.3)
+    node[midway, below, font=\small\sffamily] {Backward pass};
+  \node[font=\scriptsize\sffamily] at (3, -0.9) {pretend sign() = identity};
+  \node[font=\scriptsize\sffamily] at (3, -1.3)
+    {$\frac{\partial}{\partial w} \approx 1$ (STE)};
+\end{tikzpicture}
+\caption{The straight-through estimator: use binary weights going
+  forward, but let gradients flow as if the binarisation step was not
+  there during backpropagation.}
+\label{fig:ste}
+\end{figure}
+
+This is a hack, and it introduces noise into the gradient signal. But
+it works well enough to train BNNs to useful accuracy levels.
+
+% --- Formalisation ---
+\subsection{Mathematical Summary}
+\label{sec:bnn-math}
+
+A binary linear layer with $m$ inputs and $n$ outputs is defined as:
+
+\begin{align}
+  \bm{W}_b &= \operatorname{sign}(\bm{W}) \in \{-1, +1\}^{n \times m}
+    \label{eq:bnn-weight} \\
+  \bm{x}_b &= \operatorname{sign}(\bm{x}) \in \{-1, +1\}^m
+    \label{eq:bnn-input} \\
+  \bm{z} &= \bm{W}_b \bm{x}_b
+    = 2 \cdot \operatorname{popcount}(\operatorname{XNOR}(\bm{W}_b, \bm{x}_b)) - m
+    \label{eq:bnn-forward} \\
+  \bm{y} &= \operatorname{BatchNorm}(\bm{z})
+    \label{eq:bnn-output}
+\end{align}
+
+Batch normalisation (\cref{eq:bnn-output}) is critical in BNNs---it
+re-centres the integer-valued popcount outputs before the next
+binarisation step, preventing information collapse.
+
+\subsection{Performance on MNIST and Beyond}
+\label{sec:bnn-performance}
+
+\begin{table}[htbp]
+\centering
+\caption{BNN performance benchmarks from the literature~\cite{courbariaux2016bnn, rastegari2016xnornet, bnnfpga2025, ma2024bitnet}.}
+\label{tab:bnn-perf}
+\begin{tabular}{@{}llrr@{}}
+  \toprule
+  \textbf{Architecture} & \textbf{Dataset} & \textbf{Accuracy} & \textbf{Speedup} \\
+  \midrule
+  BNN~\cite{courbariaux2016bnn} & MNIST   & 98.6\%  & 7$\times$ \\
+  XNOR-Net~\cite{rastegari2016xnornet} & ImageNet & 51.2\%  & 58$\times$ \\
+  BNN on FPGA~\cite{bnnfpga2025} & MNIST   & 84.0\%  & Real-time \\
+  BitNet b1.58~\cite{ma2024bitnet} & LLM 3B  & Competitive & 2.7$\times$ \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+BNNs excel at speed but sacrifice accuracy on complex tasks (ImageNet
+drops from 76\% to 51\%~\cite{rastegari2016xnornet}). On MNIST, the accuracy loss is minimal
+($<$1\%), making it a viable paradigm for our proof of concept.
+
+\subsection{Strengths and Limitations}
+
+\begin{description}[leftmargin=1em]
+  \item[Strengths:]
+    Extreme speed (XNOR + popcount), tiny model size (1~bit per weight),
+    well-understood theory~\cite{bnnsurvey2020}, hardware-friendly (FPGA, ASIC)~\cite{bnnfpga2025}.
+
+  \item[Limitations:]
+    Accuracy drops on complex tasks, the STE is a gradient approximation
+    (noisy training), batch normalisation is still floating-point,
+    limited expressiveness per neuron.
+\end{description}

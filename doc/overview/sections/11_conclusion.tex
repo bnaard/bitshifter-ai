@@ -1,0 +1,121 @@
+% ============================================================================
+\section{Conclusion and Next Steps}
+\label{sec:conclusion}
+% ============================================================================
+
+\subsection{Summary}
+
+This article has surveyed four paradigms for building neural networks
+without traditional multiply-accumulate arithmetic:
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Binary Neural Networks}~\cite{courbariaux2016bnn, rastegari2016xnornet} replace multiplication with
+    XNOR and accumulation with popcount. They are the most mature
+    paradigm~\cite{bnnsurvey2020}, with proven speedups up to 58$\times$~\cite{rastegari2016xnornet}, but suffer
+    accuracy degradation on complex tasks and still require
+    floating-point batch normalisation at inference.
+
+  \item \textbf{Tsetlin Machines}~\cite{granmo2018tsetlin} replace the neuron metaphor entirely
+    with propositional logic clauses learned through simple automata.
+    They are the only paradigm that avoids floating-point arithmetic
+    during both training and inference, and they offer full
+    interpretability of the learned model. They achieve 99.35\% on
+    MNIST~\cite{lecun1998mnist}.
+
+  \item \textbf{Logic Gate Networks}~\cite{petersen2022difflogic} learn both the type and
+    connectivity of logic gates end-to-end. They produce pure logic
+    circuits at inference time, mapping directly to hardware. Their
+    main limitation is the 2-input restriction per gate, requiring
+    deep networks for complex tasks.
+
+  \item \textbf{KAN/LUT compilation}~\cite{liu2024kan, lutkan2025} trains with maximally expressive
+    learnable functions (B-splines on every edge) and then compiles
+    them into lookup tables for deployment. This elegantly trades
+    memory for computation, achieving near-zero-cost inference at
+    the price of larger stored tables.
+\end{enumerate}
+
+\subsection{The Hybrid Hypothesis}
+
+We propose that combining Tsetlin Machines (for interpretable feature
+extraction), Logic Gate Networks (for flexible composition), and LUT
+compilation (for efficient deployment) can yield an architecture that
+achieves competitive accuracy on MNIST while:
+
+\begin{itemize}[leftmargin=2em]
+  \item Using \emph{no} floating-point arithmetic at inference time
+  \item Producing a partially interpretable model
+  \item Running entirely on CPU bitwise instructions and memory lookups
+  \item Being implementable in Rust with no external ML framework
+    dependencies
+\end{itemize}
+
+\subsection{Scaling Beyond MNIST}
+
+\Cref{sec:transformers-llms} and \cref{sec:scaling-llms} examined
+whether the bitwise paradigms can scale beyond classification tasks.
+The analysis reveals a nuanced picture:
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{For LLMs:} No single paradigm can replace the
+    transformer architecture, but each paradigm can serve as a
+    component \emph{within} a transformer. The combination of BitNet
+    ternary weights, LUT-compiled activations, Logic Gate Network
+    MLP blocks, and Tsetlin Machine MoE routing could yield a
+    transformer that is 95--99\% integer/bitwise, with floating point
+    confined to the attention softmax and normalisation layers.
+    Softmax-free architectures (Mamba, linear attention) offer a
+    path to eliminating even that remaining floating-point dependency.
+
+  \item \textbf{For world models and sound synthesis:} The hybrid
+    architecture could serve as a fast, interpretable front-end for
+    acoustic classification and parameter estimation, feeding into
+    classical DSP backends. The KAN/LUT layer is particularly
+    promising as a bridge between Boolean features and continuous
+    synthesis parameters.
+\end{itemize}
+
+\subsection{Next Steps}
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Theory document:} A detailed design document
+    specifying the hybrid architecture's mathematical formulation,
+    layer dimensions, training algorithm, and convergence properties.
+
+  \item \textbf{Rust implementation:} Phased implementation starting
+    with the Tsetlin Machine component, then the LGN layer, then
+    LUT compilation, with integration tests at each phase.
+
+  \item \textbf{Benchmarking:} Systematic comparison against a
+    standard FP32 MLP on accuracy, latency, model size, and
+    estimated energy consumption.
+
+  \item \textbf{Analysis:} Inspection of learned Tsetlin clauses
+    for interpretability, gate type distributions in the LGN layer,
+    and LUT resolution sensitivity analysis.
+
+  \item \textbf{LLM scaling exploration:} Staged research programme
+    from BitNet + LUT activations through softmax-free attention
+    to full integration (\cref{sec:path-forward-llms}).
+\end{enumerate}
+
+\subsection{A Broader Perspective}
+
+The significance of bitwise neural computation extends beyond any
+single task. If these approaches can match floating-point accuracy on
+practical problems, they open the door to AI that runs on
+microcontrollers, embedded sensors, and edge devices without
+specialised hardware---truly democratising access to machine
+intelligence.
+
+The honest conclusion is that no single architecture dominates all
+tasks. The hybrid approach's strength---everything is Boolean,
+interpretable, and cache-resident---is also its constraint. But by
+embedding bitwise components within proven architectures (like
+transformers) rather than trying to replace those architectures
+wholesale, the paradigms surveyed here gain a much broader reach.
+
+The journey from MNIST to fully bitwise language models is long,
+but each step along it produces a working, deployable, interpretable
+system. That incremental usability may be the hybrid architecture's
+most important property.

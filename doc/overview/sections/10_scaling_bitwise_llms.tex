@@ -1,0 +1,494 @@
+% ============================================================================
+\section{Scaling Bitwise Computation to Large Language Models}
+\label{sec:scaling-llms}
+% ============================================================================
+
+Armed with an understanding of the transformer architecture, we can
+now revisit the question from \cref{sec:hybrid}: can the four bitwise
+paradigms be combined in a way that scales to LLM-sized models?
+
+The previous section showed that only two components---the attention
+softmax and layer normalisation---fundamentally require floating-point
+arithmetic. This section proposes a combination strategy that assigns
+each paradigm to the transformer component it is best suited for.
+
+% ----------------------------------------------------------------------------
+\subsection{Why No Single Paradigm Scales}
+\label{sec:why-no-single}
+% ----------------------------------------------------------------------------
+
+Let us first be clear about why each paradigm \emph{alone} fails at
+LLM scale:
+
+\begin{description}[leftmargin=1em]
+  \item[Binary Neural Networks] can binarise weights and activations,
+    but the BNN approach assumes a fixed network topology. It does not
+    address the attention mechanism, which is the defining innovation
+    of transformers. BitNet b1.58~\cite{ma2024bitnet} succeeds
+    precisely because it only binarises the \emph{weights}---not the
+    architecture.
+
+  \item[Tsetlin Machines] learn propositional clauses over Boolean
+    features. Language tokens are categorical with distributional
+    semantics---booleanising 4{,}096-dimensional embeddings would
+    destroy the fine-grained similarity structure that makes language
+    modelling work. Additionally, Tsetlin Machines have no native
+    mechanism for the pairwise token interactions that attention
+    provides.
+
+  \item[Logic Gate Networks] with 2-input gates would require
+    astronomical circuit depth to approximate the $n \times n$
+    attention computation over thousands of tokens. The softmax
+    operation is inherently continuous. However, LGNs could work at
+    the \emph{component level}---replacing individual MLP blocks
+    rather than the entire transformer.
+
+  \item[KAN / LUT compilation] faces an exponential scaling wall:
+    lookup tables grow exponentially with input dimensionality.
+    A function of 4{,}096-dimensional embeddings cannot be stored
+    as a table. But a \emph{univariate} activation function (1D input)
+    can easily be stored as a 256-entry table, which is exactly where
+    LUT compilation shines.
+\end{description}
+
+\begin{keyinsight}
+The insight is not ``which paradigm replaces the transformer?'' but
+rather ``which paradigm can serve as a component \emph{inside} a
+transformer?'' The transformer architecture is non-negotiable for
+language. The four paradigms become optimisation techniques within
+that structure, not replacements for it.
+\end{keyinsight}
+
+% ----------------------------------------------------------------------------
+\subsection{A Combined Architecture: Bitwise Components in a Transformer Shell}
+\label{sec:combined-architecture}
+% ----------------------------------------------------------------------------
+
+We propose mapping each paradigm to the transformer component where
+its strengths are most relevant:
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  comp/.style={draw, rounded corners=4pt, minimum width=5cm,
+    minimum height=1.0cm, font=\small\sffamily, align=center,
+    line width=0.8pt},
+  paradigm/.style={font=\scriptsize\sffamily\bfseries, rounded corners=2pt,
+    draw, inner sep=3pt, fill=#1!15, draw=#1!60},
+  arr/.style={-{Stealth[length=5pt]}, thick},
+  note/.style={font=\scriptsize\sffamily, text width=5cm}
+]
+  % Components stack
+  \node[comp, fill=bitgray!5] (emb) at (0, 0)
+    {Embedding lookup};
+  \node[comp, fill=bitblue!8] (qkv) at (0, 1.5)
+    {QKV projection};
+  \node[comp, fill=red!8, draw=red!40] (attn) at (0, 3)
+    {Attention softmax};
+  \node[comp, fill=bitblue!8] (oproj) at (0, 4.5)
+    {Output projection};
+  \node[comp, fill=red!8, draw=red!40] (ln) at (0, 6)
+    {Layer normalisation};
+  \node[comp, fill=bitorange!8] (mlp) at (0, 7.5)
+    {MLP / feed-forward};
+  \node[comp, fill=bitgreen!8] (gate) at (0, 9)
+    {MoE router (if used)};
+
+  % Paradigm labels
+  \node[paradigm=bitgray, right] at (3.5, 0)
+    {Integer table lookup (no paradigm needed)};
+  \node[paradigm=bitblue, right] at (3.5, 1.5)
+    {BitNet: ternary $\{-1, 0, +1\}$ weights};
+  \node[paradigm=red, right] at (3.5, 3)
+    {Open problem (see \cref{sec:softmax-problem})};
+  \node[paradigm=bitblue, right] at (3.5, 4.5)
+    {BitNet: ternary weights};
+  \node[paradigm=red, right] at (3.5, 6)
+    {Open problem (see \cref{sec:layernorm-problem})};
+  \node[paradigm=bitorange, right] at (3.5, 7.5)
+    {LGN inference + LUT activations};
+  \node[paradigm=bitgreen, right] at (3.5, 9)
+    {Tsetlin Machine gating};
+
+  % Arrows
+  \foreach \a/\b in {emb/qkv, qkv/attn, attn/oproj, oproj/ln, ln/mlp, mlp/gate} {
+    \draw[arr] (\a) -- (\b);
+  }
+
+  % Legend
+  \draw[thick, red!40, fill=red!8, rounded corners=2pt]
+    (-3.5, -1.5) rectangle (-1.5, -1.0);
+  \node[font=\scriptsize\sffamily, right] at (-1.3, -1.25)
+    {= remaining floating-point};
+  \draw[thick, bitblue!40, fill=bitblue!8, rounded corners=2pt]
+    (-3.5, -2.2) rectangle (-1.5, -1.7);
+  \node[font=\scriptsize\sffamily, right] at (-1.3, -1.95)
+    {= integer/ternary arithmetic};
+\end{tikzpicture}
+\caption{Proposed mapping of bitwise paradigms to transformer
+  components. Green and blue components can be made (near-)bitwise
+  today. Red components remain open problems requiring floating-point
+  arithmetic or novel replacements.}
+\label{fig:combined-architecture}
+\end{figure}
+
+\subsubsection{Component 1: BitNet Ternary Weights (BNN Paradigm)}
+
+The weight matrices $\bm{W}_Q$, $\bm{W}_K$, $\bm{W}_V$,
+$\bm{W}_O$, $\bm{W}_1$, $\bm{W}_2$ are constrained to ternary
+values $\{-1, 0, +1\}$, following the BitNet b1.58
+approach~\cite{ma2024bitnet}.
+
+\textbf{What this buys:}
+\begin{itemize}[leftmargin=2em]
+  \item Weight storage drops from 16~bits to 1.58~bits per parameter
+    (a 10$\times$ reduction).
+  \item Matrix multiplication becomes addition and subtraction (no
+    multiplier circuits needed).
+  \item Proven at 3B+ parameter scale with competitive accuracy.
+\end{itemize}
+
+\textbf{What remains floating-point:} The activations (intermediate
+values flowing between layers) remain in higher precision (typically
+8-bit integers in BitNet). The ternary constraint applies only to the
+stored weights.
+
+\subsubsection{Component 2: LUT-Compiled Activations (KAN Paradigm)}
+
+The activation functions in the MLP blocks (GELU, SiLU, etc.)
+are fixed mathematical functions applied element-wise. Instead of
+computing them with floating-point arithmetic, we can:
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Train} with learnable activation functions
+    (KAN-style B-splines or learnable piecewise-linear functions).
+  \item \textbf{Compile} the learned functions into lookup tables:
+    a 256-entry table maps each possible 8-bit input to a
+    precomputed output.
+\end{enumerate}
+
+\textbf{What this buys:}
+\begin{itemize}[leftmargin=2em]
+  \item Activation computation becomes a single table lookup---pure
+    memory access, no arithmetic.
+  \item Each layer can learn its own optimal activation shape, rather
+    than using one fixed function everywhere.
+  \item The LUT fits in L1 cache (256 entries $\times$ 1~byte = 256~bytes).
+\end{itemize}
+
+\textbf{Why KANs do not replace the full MLP:} As discussed in
+\cref{sec:ffn}, the MLP block has $d \times d_\text{ff}$ connections.
+Replacing each with a full B-spline would create an explosion in
+parameters and training cost. But replacing only the
+\emph{per-neuron activation function} with a learned spline and then
+compiling to a LUT is lightweight and practical.
+
+\subsubsection{Component 3: Logic Gate Network MLP (LGN Paradigm)}
+
+The MLP blocks account for roughly two-thirds of the parameters and
+computation in a transformer. After training with ternary weights and
+LUT activations, the MLP can potentially be \emph{further compiled}
+into a logic gate network for inference:
+
+\begin{enumerate}[leftmargin=2em]
+  \item Train the MLP with standard methods (ternary weights + LUT
+    activations).
+  \item After training, \emph{compile} the trained MLP into an
+    equivalent Boolean circuit, where the quantised weights and
+    activations are mapped to logic gate configurations.
+  \item The inference-time MLP becomes a fixed logic circuit with no
+    arithmetic operations.
+\end{enumerate}
+
+\textbf{What this buys:}
+\begin{itemize}[leftmargin=2em]
+  \item Inference-time MLP is pure combinational logic (AND/OR/XOR
+    gates)---maximum hardware efficiency.
+  \item Maps directly to FPGA or ASIC implementations.
+  \item No weight memory needed at inference: the function is
+    ``burned into'' the circuit topology.
+\end{itemize}
+
+\textbf{What is unproven:} LGNs have been demonstrated at MNIST scale
+(thousands of gates). A transformer MLP block at 7B scale has 67M
+parameters per layer. Whether the LGN compilation approach can scale
+to this size without prohibitive circuit depth or accuracy loss is an
+open research question.
+
+\subsubsection{Component 4: Tsetlin Machine Router (TM Paradigm)}
+
+In a Mixture-of-Experts transformer, the gating network decides which
+expert processes each token. This is a small classification problem:
+given a token's hidden state, select the top-$k$ experts from a pool
+of $E$ options.
+
+Tsetlin Machines are a natural fit here because:
+\begin{itemize}[leftmargin=2em]
+  \item The routing decision is a low-dimensional classification
+    (typically $E = 8$ to 64 experts).
+  \item The input can be booleanised (e.g., by thresholding the
+    hidden state dimensions) without catastrophic information loss,
+    because the routing decision does not need the same fine-grained
+    precision as the main computation.
+  \item The learned clauses would be \emph{interpretable}: we could
+    inspect \emph{why} a particular token was routed to a particular
+    expert, expressed as human-readable Boolean rules.
+\end{itemize}
+
+\textbf{What this buys:}
+\begin{itemize}[leftmargin=2em]
+  \item Interpretable routing decisions (no black-box gating).
+  \item Integer-only routing computation (no floating-point softmax
+    in the gating network).
+  \item Potential for faster routing than a learned linear layer.
+\end{itemize}
+
+\textbf{What is unproven:} Whether Tsetlin Machine routing can match
+the load-balancing and accuracy of continuous gating functions at LLM
+scale.
+
+% ----------------------------------------------------------------------------
+\subsection{The Softmax Problem}
+\label{sec:softmax-problem}
+% ----------------------------------------------------------------------------
+
+The attention softmax (\cref{eq:softmax}) is the single most
+important obstacle to a fully bitwise transformer. Let us examine why
+it is hard and what alternatives exist.
+
+\subsubsection{Why Softmax Resists Binarisation}
+
+Softmax converts a vector of raw scores $\bm{z} = [z_1, \ldots, z_n]$
+into a probability distribution:
+
+\[
+  \text{softmax}(z_i) = \frac{e^{z_i}}{\sum_{j=1}^{n} e^{z_j}}
+\]
+
+This operation has three properties that are fundamentally at odds
+with bitwise computation:
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Exponentiation.} The function $e^x$ maps integers to
+    irrational numbers. There is no bitwise approximation of $e^x$
+    that preserves its essential property: amplifying differences
+    between large and small values.
+
+  \item \textbf{Normalisation.} Dividing by the sum ensures outputs
+    sum to~1. Division is the most expensive basic arithmetic
+    operation and does not have a bitwise equivalent.
+
+  \item \textbf{Precision sensitivity.} The attention mechanism
+    relies on distinguishing between scores like 0.15 and 0.17. In
+    a 4{,}096-token sequence, the softmax distributes attention mass
+    across thousands of tokens, and small differences in the
+    distribution affect which information propagates forward. Binary
+    attention (attend or not) would be too coarse.
+\end{enumerate}
+
+\subsubsection{Potential Replacements}
+
+Several research directions aim to reduce or eliminate the softmax:
+
+\begin{description}[leftmargin=1em]
+  \item[Linear attention.] Replace $\text{softmax}(\bm{Q}\bm{K}^\top)\bm{V}$
+    with $\phi(\bm{Q})\phi(\bm{K})^\top\bm{V}$, where $\phi$ is a
+    feature map (e.g., $\text{elu}(x) + 1$ or random
+    features). This avoids the $n \times n$ attention matrix entirely.
+    Linear attention has $O(n)$ complexity instead of $O(n^2)$, but
+    current models using it (e.g., RWKV, Mamba) trade some quality
+    for this efficiency.
+
+  \item[ReLU or squared attention.] Replace softmax with
+    $\text{ReLU}(\bm{Q}\bm{K}^\top)$ or
+    $(\bm{Q}\bm{K}^\top)^2$. These are non-negative (like softmax)
+    but avoid exponentiation. Squaring is just multiplication;
+    ReLU is a simple threshold (which \emph{is} a bitwise-friendly
+    operation). Recent work shows these can achieve competitive
+    quality on some tasks, but they lack softmax's normalisation,
+    which can cause training instability.
+
+  \item[Integer softmax approximation.] Approximate $e^x$ using
+    piecewise linear functions or lookup tables, and approximate
+    division using bit shifts. This has been demonstrated in
+    inference-only quantisation (e.g., I-BERT), but typically with
+    some accuracy degradation.
+
+  \item[Gated attention / state-space models.] Architectures like
+    Mamba~\cite{gu2024mamba} and RWKV replace attention entirely
+    with recurrent state-space mechanisms that use element-wise
+    gating instead of softmax. These are more amenable to
+    integer/bitwise implementation, and have shown competitive
+    results on language modelling benchmarks at multi-billion
+    parameter scale.
+\end{description}
+
+\begin{keyinsight}
+The softmax problem may not need to be ``solved'' within the
+softmax framework. If state-space models (like Mamba) or linear
+attention variants prove competitive with transformers at scale,
+they offer a path to fully integer attention. The question shifts
+from ``how do we binarise softmax?'' to ``can we build LLMs without
+softmax at all?'' Early results are promising but not yet
+conclusive at the largest scales.
+\end{keyinsight}
+
+% ----------------------------------------------------------------------------
+\subsection{The Layer Normalisation Problem}
+\label{sec:layernorm-problem}
+% ----------------------------------------------------------------------------
+
+Layer normalisation (\cref{eq:layernorm}) is the second
+floating-point holdout. It requires computing the mean and variance
+of a vector, then dividing each element by the standard deviation.
+
+The situation here is more tractable than softmax:
+
+\begin{description}[leftmargin=1em]
+  \item[RMSNorm] (used in Llama and most modern LLMs) drops the
+    mean computation entirely:
+    $\text{RMSNorm}(\bm{x}) = \bm{x} / \text{RMS}(\bm{x}) \cdot \bm{\gamma}$,
+    where $\text{RMS}(\bm{x}) = \sqrt{\frac{1}{d}\sum_i x_i^2}$.
+    This still requires a square root and division, but the
+    computation is simpler.
+
+  \item[Integer RMSNorm.] The sum of squares $\sum_i x_i^2$ is an
+    integer operation if $\bm{x}$ is integer. The square root and
+    division can be approximated with bit-shift techniques or small
+    lookup tables. Practical integer-only implementations have been
+    demonstrated in quantised inference.
+
+  \item[BitNet's approach.] BitNet b1.58 retains RMSNorm in
+    higher precision, arguing that the normalisation computation is
+    a tiny fraction of total operations (it processes $d$ values
+    per token, versus $d \times d_\text{ff}$ in the MLP). The
+    pragmatic argument: even if normalisation stays in floating
+    point, it accounts for less than 1\% of total operations.
+\end{description}
+
+\begin{engineernote}
+Layer normalisation may be the wrong hill to die on for full
+binarisation. Even in a hypothetical ``99\% bitwise'' transformer,
+the normalisation steps contribute a negligible fraction of total
+energy and latency. The engineering priority should be the
+attention mechanism and MLP blocks, which dominate both computation
+and memory bandwidth.
+\end{engineernote}
+
+% ----------------------------------------------------------------------------
+\subsection{The Realistic Picture}
+\label{sec:realistic-picture}
+% ----------------------------------------------------------------------------
+
+\Cref{tab:bitwise-llm-summary} summarises the current state of each
+component.
+
+\begin{table}[htbp]
+\centering
+\caption{Feasibility assessment for bitwise transformer components.
+  ``Proven'' means demonstrated at LLM scale (billions of parameters);
+  ``plausible'' means demonstrated at smaller scale or with minor
+  accuracy trade-offs; ``open'' means no convincing demonstration
+  exists.}
+\label{tab:bitwise-llm-summary}
+\begin{tabular}{@{}p{3cm}lp{3cm}p{4.5cm}@{}}
+  \toprule
+  \textbf{Component} & \textbf{Paradigm} & \textbf{Status}
+    & \textbf{Key challenge} \\
+  \midrule
+  Weight storage & BitNet (BNN) & Proven (3B+) & None---ternary weights work. \\
+  Matrix multiply & BitNet (BNN) & Proven & Addition/subtraction only. \\
+  Activation fn. & KAN $\to$ LUT & Plausible & Per-layer learned activations need validation at scale. \\
+  MLP compilation & LGN & Open & Circuit depth at transformer MLP scale. \\
+  MoE routing & Tsetlin Machine & Open & Load balancing, accuracy matching. \\
+  Attention & (see below) & Open & Softmax replacement. \\
+  Layer norm & Integer approx. & Plausible & Small accuracy trade-off acceptable. \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{What Could Work Today}
+
+A ``mostly bitwise'' LLM using:
+\begin{itemize}[leftmargin=2em]
+  \item Ternary weights throughout (BitNet b1.58),
+  \item LUT-compiled activation functions,
+  \item Integer-approximated RMSNorm,
+  \item Standard softmax attention (the remaining floating-point
+    component).
+\end{itemize}
+
+This configuration would make approximately 95\% of operations
+integer or bitwise, with floating point confined to the attention
+softmax and a thin normalisation layer. It is achievable with
+today's research.
+
+\subsubsection{What Could Work Soon}
+
+Replace softmax attention with a softmax-free alternative:
+\begin{itemize}[leftmargin=2em]
+  \item State-space models (Mamba) or linear attention for the
+    sequence mixing component.
+  \item ReLU attention or gated attention as drop-in replacements
+    within the transformer structure.
+  \item Integer-approximated softmax via LUT-based $e^x$ and
+    bit-shift division.
+\end{itemize}
+
+This would push the architecture to 99\%+ bitwise/integer operations.
+The research exists in pieces; the integration and validation at
+scale is the remaining work.
+
+\subsubsection{What Remains Speculative}
+
+A \emph{fully} bitwise LLM with:
+\begin{itemize}[leftmargin=2em]
+  \item Logic Gate Network MLP blocks (compiled from trained ternary
+    MLPs),
+  \item Tsetlin Machine MoE routing,
+  \item All-integer attention and normalisation.
+\end{itemize}
+
+This is the ambitious end-state. Each component exists in isolation
+at small scale, but the integration, the compounding of
+approximation errors across 80+ layers, and the training dynamics
+at billions of parameters are all uncharted territory.
+
+% ----------------------------------------------------------------------------
+\subsection{The Path Forward}
+\label{sec:path-forward-llms}
+% ----------------------------------------------------------------------------
+
+Rather than attempting a fully bitwise LLM immediately, a staged
+research programme would build confidence incrementally:
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{MNIST hybrid} (current project): Validate the
+    four-paradigm combination on a tractable problem.
+
+  \item \textbf{BitNet + LUT activations}: Take an existing BitNet
+    model and replace fixed activations with LUT-compiled learned
+    activations. Measure accuracy impact. This is a minimal
+    intervention with clear evaluation.
+
+  \item \textbf{Softmax-free BitNet}: Combine ternary weights with
+    a softmax-free attention mechanism (linear attention, ReLU
+    attention, or Mamba-style gating). Evaluate on standard language
+    benchmarks.
+
+  \item \textbf{LGN MLP compilation}: Train a small transformer
+    (125M parameters) with ternary weights, then attempt to compile
+    the MLP blocks into logic gate networks. Measure inference
+    speed and accuracy preservation.
+
+  \item \textbf{TM routing for MoE}: Implement Tsetlin Machine
+    routing in a MoE transformer and compare with standard softmax
+    gating on load balance and accuracy.
+
+  \item \textbf{Integration}: Combine the successful components
+    into a single architecture and evaluate at increasing scale.
+\end{enumerate}
+
+Each step is independently publishable and valuable regardless of
+whether the full vision materialises. The MNIST project we develop
+in this article is step~1.

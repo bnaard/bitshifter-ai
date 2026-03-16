@@ -1,0 +1,293 @@
+% ============================================================================
+\section{Paradigm 3: Logic Gate Networks}
+\label{sec:lgn}
+% ============================================================================
+
+% --- Intuition ---
+\subsection{The Idea in Plain English}
+
+Binary Neural Networks hardcode the operation: it is always XNOR.
+Tsetlin Machines hardcode the operation: it is always AND (within
+clauses). But what if the network could \emph{choose} which logic
+gate to use at each connection?
+
+A Logic Gate Network~\cite{petersen2022difflogic} is a layered network where each ``neuron'' is
+a 2-input logic gate, and both the gate's \emph{inputs} (which two
+signals to connect) and its \emph{type} (AND, OR, XOR, NAND, etc.)
+are learned during training.
+
+\begin{analogy}
+Imagine building a circuit on a breadboard. You have a box of
+different logic gate chips (AND, OR, XOR, NAND, NOR, XNOR). A
+Logic Gate Network is like having a robot that tries different chips
+in each socket and different wiring configurations, testing each
+combination, and gradually settling on the circuit that best solves
+the classification problem.
+\end{analogy}
+
+% --- Mechanism ---
+\subsection{How It Works}
+
+\subsubsection{The 16 Possible 2-Input Gates}
+
+Two binary inputs can produce $2^{2^2} = 16$ possible logic functions.
+These include the familiar gates plus some degenerate cases:
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  cell/.style={minimum width=1.0cm, minimum height=0.5cm,
+    font=\scriptsize\ttfamily, inner sep=0pt},
+  header/.style={cell, font=\scriptsize\sffamily\bfseries},
+  >=Stealth
+]
+  % Table header
+  \node[header] at (0, 0.8) {$a$};
+  \node[header] at (1, 0.8) {$b$};
+  \draw[thick] (-0.5, 0.5) -- (10.5, 0.5);
+
+  % Input rows
+  \foreach \a/\b/\row in {0/0/0, 0/1/-0.5, 1/0/-1, 1/1/-1.5} {
+    \node[cell] at (0, \row) {\a};
+    \node[cell] at (1, \row) {\b};
+  }
+
+  % Selected gates - explicit nodes to avoid nested foreach issues
+  % AND
+  \node[header] at (2.5, 0.8) {AND};
+  \node[cell] at (2.5, 0) {0}; \node[cell] at (2.5, -0.5) {0};
+  \node[cell] at (2.5, -1) {0}; \node[cell, fill=bitblue!15] at (2.5, -1.5) {1};
+  % OR
+  \node[header] at (3.7, 0.8) {OR};
+  \node[cell] at (3.7, 0) {0}; \node[cell, fill=bitblue!15] at (3.7, -0.5) {1};
+  \node[cell, fill=bitblue!15] at (3.7, -1) {1}; \node[cell, fill=bitblue!15] at (3.7, -1.5) {1};
+  % XOR
+  \node[header] at (4.9, 0.8) {XOR};
+  \node[cell] at (4.9, 0) {0}; \node[cell, fill=bitblue!15] at (4.9, -0.5) {1};
+  \node[cell, fill=bitblue!15] at (4.9, -1) {1}; \node[cell] at (4.9, -1.5) {0};
+  % NAND
+  \node[header] at (6.1, 0.8) {NAND};
+  \node[cell, fill=bitblue!15] at (6.1, 0) {1}; \node[cell, fill=bitblue!15] at (6.1, -0.5) {1};
+  \node[cell, fill=bitblue!15] at (6.1, -1) {1}; \node[cell] at (6.1, -1.5) {0};
+  % NOR
+  \node[header] at (7.3, 0.8) {NOR};
+  \node[cell, fill=bitblue!15] at (7.3, 0) {1}; \node[cell] at (7.3, -0.5) {0};
+  \node[cell] at (7.3, -1) {0}; \node[cell] at (7.3, -1.5) {0};
+  % XNOR
+  \node[header] at (8.5, 0.8) {XNOR};
+  \node[cell, fill=bitblue!15] at (8.5, 0) {1}; \node[cell] at (8.5, -0.5) {0};
+  \node[cell] at (8.5, -1) {0}; \node[cell, fill=bitblue!15] at (8.5, -1.5) {1};
+
+  % Separator
+  \draw[bitgray, thick] (1.5, 1.1) -- (1.5, -1.8);
+\end{tikzpicture}
+\caption{Truth tables for six commonly used 2-input gates. There are 16
+  possible functions in total. An LGN learns which function each node
+  should implement.}
+\label{fig:truth-tables}
+\end{figure}
+
+\subsubsection{Differentiable Gate Selection}
+
+The core trick of LGNs is making the discrete choice of gate type
+\emph{differentiable} so that gradient descent can be used for
+training.
+
+Each node maintains a probability distribution over the 16 possible
+gate functions. During training, the output is a weighted average:
+
+\begin{equation}
+  \text{output} = \sum_{g=0}^{15} p_g \cdot f_g(a, b)
+  \label{eq:lgn-soft}
+\end{equation}
+
+where $p_g$ is the (learnable) probability of gate $g$ and $f_g(a,b)$
+is gate $g$'s output for inputs $a, b$.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  node/.style={draw, circle, minimum size=0.8cm, font=\tiny\sffamily,
+    inner sep=0pt, line width=0.8pt},
+  >=Stealth
+]
+  % Input layer
+  \foreach \i in {1,...,6} {
+    \node[node, fill=lightbg] (in\i) at (0, 5.5-\i) {$x_\i$};
+  }
+
+  % Hidden layer 1
+  \foreach \i/\gate/\col in {1/AND/bitblue, 2/XOR/bitorange,
+    3/OR/bitgreen, 4/NAND/bitpurple} {
+    \node[node, fill=\col!15] (h1\i) at (3, 5-\i) {\gate};
+  }
+
+  % Hidden layer 2
+  \foreach \i/\gate/\col in {1/XOR/bitorange, 2/AND/bitblue,
+    3/OR/bitgreen} {
+    \node[node, fill=\col!15] (h2\i) at (6, 4.5-\i) {\gate};
+  }
+
+  % Output
+  \node[node, fill=bitblue!15] (out) at (9, 3) {AND};
+
+  % Connections (selected, not all-to-all)
+  \draw[->, thick] (in1) -- (h11);
+  \draw[->, thick] (in2) -- (h11);
+  \draw[->, thick] (in1) -- (h12);
+  \draw[->, thick] (in3) -- (h12);
+  \draw[->, thick] (in4) -- (h13);
+  \draw[->, thick] (in5) -- (h13);
+  \draw[->, thick] (in3) -- (h14);
+  \draw[->, thick] (in6) -- (h14);
+
+  \draw[->, thick] (h11) -- (h21);
+  \draw[->, thick] (h12) -- (h21);
+  \draw[->, thick] (h12) -- (h22);
+  \draw[->, thick] (h13) -- (h22);
+  \draw[->, thick] (h13) -- (h23);
+  \draw[->, thick] (h14) -- (h23);
+
+  \draw[->, thick] (h21) -- (out);
+  \draw[->, thick] (h23) -- (out);
+
+  % Labels
+  \node[font=\small\sffamily, above] at (0, 5) {Inputs};
+  \node[font=\small\sffamily, above] at (3, 5) {Layer 1};
+  \node[font=\small\sffamily, above] at (6, 5) {Layer 2};
+  \node[font=\small\sffamily, above] at (9, 4) {Output};
+
+  % Annotation
+  \node[font=\scriptsize\sffamily, bitgray, align=center] at (4.5, -0.5)
+    {Both the gate types and the wiring\\are learned during training};
+\end{tikzpicture}
+\caption{A Logic Gate Network. Each node is a 2-input logic gate whose
+  type is learned. The connectivity (which nodes feed into which) is
+  also learned. At inference time, this is a pure logic circuit with
+  zero arithmetic.}
+\label{fig:lgn-architecture}
+\end{figure}
+
+\subsubsection{Training: From Soft to Hard}
+
+During training, the network operates in ``soft'' mode: gate outputs
+are real-valued probabilities, and gradients flow through the weighted
+sum. As training progresses, the distributions sharpen (via temperature
+annealing or Gumbel-softmax), until each node has a clear winner.
+
+At inference time, each node commits to its most probable gate type
+and operates in pure binary logic---no floating-point, no
+probabilities.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth]
+  % Training phase
+  \begin{scope}
+    \node[font=\small\sffamily\bfseries] at (2, 3) {During Training};
+    \draw[fill=bitblue!20, draw=bitblue] (0, 0) rectangle (0.6, 1.5);
+    \draw[fill=bitorange!40, draw=bitorange] (0.8, 0) rectangle (1.4, 2.2);
+    \draw[fill=bitgreen!20, draw=bitgreen] (1.6, 0) rectangle (2.2, 0.8);
+    \draw[fill=bitpurple!15, draw=bitpurple] (2.4, 0) rectangle (3.0, 0.3);
+    \draw[fill=bitgray!10, draw=bitgray] (3.2, 0) rectangle (3.8, 0.2);
+    \node[font=\tiny\sffamily, below, rotate=45] at (0.3, -0.1) {AND};
+    \node[font=\tiny\sffamily, below, rotate=45] at (1.1, -0.1) {XOR};
+    \node[font=\tiny\sffamily, below, rotate=45] at (1.9, -0.1) {OR};
+    \node[font=\tiny\sffamily, below, rotate=45] at (2.7, -0.1) {NAND};
+    \node[font=\tiny\sffamily, below, rotate=45] at (3.5, -0.1) {\ldots};
+    \node[font=\scriptsize\sffamily, bitgray] at (2, -1.2)
+      {Soft probabilities};
+  \end{scope}
+
+  % Arrow
+  \draw[->, very thick, bitgray] (5, 1) -- (6.5, 1)
+    node[midway, above, font=\scriptsize\sffamily] {anneal};
+
+  % Inference phase
+  \begin{scope}[xshift=7.5cm]
+    \node[font=\small\sffamily\bfseries] at (2, 3) {At Inference};
+    \draw[fill=bitblue!5, draw=bitgray!30] (0, 0) rectangle (0.6, 0.05);
+    \draw[fill=bitorange!60, draw=bitorange, line width=1.5pt]
+      (0.8, 0) rectangle (1.4, 2.5);
+    \draw[fill=bitgreen!5, draw=bitgray!30] (1.6, 0) rectangle (2.2, 0.05);
+    \draw[fill=bitpurple!5, draw=bitgray!30] (2.4, 0) rectangle (3.0, 0.05);
+    \draw[fill=bitgray!5, draw=bitgray!30] (3.2, 0) rectangle (3.8, 0.05);
+    \node[font=\tiny\sffamily, below, rotate=45] at (0.3, -0.1) {AND};
+    \node[font=\tiny\sffamily\bfseries, below, rotate=45] at (1.1, -0.1) {XOR};
+    \node[font=\tiny\sffamily, below, rotate=45] at (1.9, -0.1) {OR};
+    \node[font=\tiny\sffamily, below, rotate=45] at (2.7, -0.1) {NAND};
+    \node[font=\tiny\sffamily, below, rotate=45] at (3.5, -0.1) {\ldots};
+    \node[font=\scriptsize\sffamily, bitgray] at (2, -1.2)
+      {Hard selection: XOR};
+  \end{scope}
+\end{tikzpicture}
+\caption{Gate selection during training (soft, differentiable
+  probabilities) versus inference (hard, discrete gate commitment).
+  Temperature annealing gradually sharpens the distribution.}
+\label{fig:lgn-annealing}
+\end{figure}
+
+% --- Formalisation ---
+\subsection{Mathematical Summary}
+\label{sec:lgn-math}
+
+Let each node $i$ in layer $\ell$ receive two binary inputs
+$a_i^{(\ell)}, b_i^{(\ell)} \in \{0, 1\}$ from the previous layer.
+
+The node maintains a logit vector $\bm{\alpha}_i \in \mathbb{R}^{16}$,
+converted to probabilities via softmax with temperature $\tau$:
+\begin{equation}
+  p_g^{(i)} = \frac{\exp(\alpha_g^{(i)} / \tau)}
+    {\sum_{g'=0}^{15} \exp(\alpha_{g'}^{(i)} / \tau)}
+  \label{eq:lgn-softmax}
+\end{equation}
+
+The soft output during training is:
+\begin{equation}
+  o_i^{(\ell)} = \sum_{g=0}^{15} p_g^{(i)} \cdot
+    \operatorname{TruthTable}(g, a_i^{(\ell)}, b_i^{(\ell)})
+  \label{eq:lgn-soft-output}
+\end{equation}
+
+where $\operatorname{TruthTable}(g, a, b) \in \{0, 1\}$ is the output
+of the $g$-th Boolean function for inputs $(a, b)$.
+
+At inference ($\tau \to 0$):
+\begin{equation}
+  o_i^{(\ell)} = \operatorname{TruthTable}\!\left(
+    \arg\max_g \alpha_g^{(i)},\; a_i^{(\ell)},\; b_i^{(\ell)}\right)
+  \label{eq:lgn-hard-output}
+\end{equation}
+
+\subsection{Performance and Scale}
+
+LGNs are relatively new. Published results include:
+
+\begin{table}[htbp]
+\centering
+\caption{Logic Gate Network results~\cite{petersen2022difflogic}.}
+\label{tab:lgn-perf}
+\begin{tabular}{@{}lrrl@{}}
+  \toprule
+  \textbf{Network} & \textbf{MNIST} & \textbf{Gates} & \textbf{Note} \\
+  \midrule
+  DiffLogic~\cite{petersen2022difflogic}   & 97.8\%  & $\sim$100k & Differentiable training \\
+  LILogic Net        & 98.1\%  & $\sim$50k  & Learnable connectivity \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Strengths and Limitations}
+
+\begin{description}[leftmargin=1em]
+  \item[Strengths:]
+    Pure logic at inference (maximum hardware efficiency), both
+    gate type and connectivity are learned (highly flexible),
+    maps directly to FPGA/ASIC implementation, compact models.
+
+  \item[Limitations:]
+    2-input restriction limits expressiveness per node (needs deep
+    networks), training is slower than standard backpropagation
+    (16-way softmax per node), relatively new with less community
+    tooling, accuracy on complex tasks still being explored.
+\end{description}

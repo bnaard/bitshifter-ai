@@ -1,0 +1,174 @@
+% ============================================================================
+% Bitwise AI: A State-of-the-Art Overview
+% Main document file
+% ============================================================================
+\documentclass[11pt,a4paper]{article}
+
+% --- Core packages ---
+\usepackage{fontspec}
+\usepackage[english]{babel}
+\usepackage[top=2.5cm, bottom=2.5cm, left=2.5cm, right=2.5cm]{geometry}
+
+% --- Typography ---
+\usepackage{microtype}
+\setmainfont{Latin Modern Roman}
+\setsansfont{Latin Modern Sans}
+\setmonofont{Latin Modern Mono}
+
+% --- Math ---
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{mathtools}
+\usepackage{bm}
+
+% --- Graphics and diagrams ---
+\usepackage{tikz}
+\usetikzlibrary{
+  arrows.meta, positioning, calc, decorations.pathreplacing,
+  shapes.geometric, shapes.misc, fit, backgrounds, patterns,
+  matrix, chains, circuits.logic.US
+}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+
+% --- Tables and lists ---
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{enumitem}
+
+% --- Colors ---
+\usepackage{xcolor}
+\definecolor{bitblue}{HTML}{2563EB}
+\definecolor{bitgreen}{HTML}{16A34A}
+\definecolor{bitorange}{HTML}{EA580C}
+\definecolor{bitpurple}{HTML}{9333EA}
+\definecolor{bitgray}{HTML}{6B7280}
+\definecolor{lightbg}{HTML}{F8FAFC}
+
+% --- Code and algorithms ---
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+% --- Hyperlinks and references ---
+\usepackage[
+  colorlinks=true,
+  linkcolor=bitblue,
+  citecolor=bitgreen,
+  urlcolor=bitorange
+]{hyperref}
+\usepackage[capitalise,noabbrev]{cleveref}
+
+% --- Bibliography ---
+\usepackage[
+  backend=biber,
+  style=numeric-comp,
+  sorting=nyt,
+  maxbibnames=99
+]{biblatex}
+\addbibresource{references.bib}
+
+% --- Theorem environments ---
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}[section]
+\newtheorem{example}{Example}[section]
+\theoremstyle{remark}
+\newtheorem{remark}{Remark}[section]
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+
+% --- Custom commands ---
+\newcommand{\bitop}[1]{\texttt{\textcolor{bitblue}{#1}}}
+\newcommand{\concept}[1]{\textbf{\textcolor{bitpurple}{#1}}}
+\newcommand{\xmark}{\textcolor{red}{\ding{55}}}
+
+% --- Custom environments ---
+\usepackage{tcolorbox}
+\tcbuselibrary{skins, breakable}
+
+\newtcolorbox{keyinsight}[1][]{
+  enhanced, breakable,
+  colback=bitblue!5, colframe=bitblue!70,
+  fonttitle=\bfseries,
+  title={Key Insight},
+  #1
+}
+
+\newtcolorbox{engineernote}[1][]{
+  enhanced, breakable,
+  colback=bitgreen!5, colframe=bitgreen!70,
+  fonttitle=\bfseries,
+  title={Engineer's Note},
+  #1
+}
+
+\newtcolorbox{analogy}[1][]{
+  enhanced, breakable,
+  colback=bitorange!5, colframe=bitorange!70,
+  fonttitle=\bfseries,
+  title={Analogy},
+  #1
+}
+
+% --- Document metadata ---
+\title{%
+  \textbf{Beyond Multiply-Accumulate}\\[0.5em]
+  \Large A Practical Guide to Bitwise Neural Computation\\[0.3em]
+  \large An Overview of Four Paradigms for Hardware-Efficient AI
+}
+\author{Bernhard Gerlach}
+\date{March 2026}
+
+% ============================================================================
+\begin{document}
+% ============================================================================
+
+\maketitle
+
+\begin{abstract}
+Modern neural networks are built almost entirely on one operation:
+multiply a number by a weight and add the result to a running total.
+This \emph{multiply-accumulate} (MAC) operation demands floating-point
+hardware, consumes significant energy, and has led to an industry
+dominated by GPU manufacturers. But what if neural networks could
+be built from the simplest operations a processor can perform---AND,
+OR, XOR, and table lookups?
+
+This article surveys four paradigms that pursue this goal:
+\textbf{Binary Neural Networks}, which constrain weights to $\{-1, +1\}$
+and replace multiplication with XNOR gates;
+\textbf{Tsetlin Machines}, which learn propositional logic clauses
+through simple automata;
+\textbf{Logic Gate Networks}, which learn the wiring \emph{and} type of
+logic gates end-to-end; and
+\textbf{Kolmogorov-Arnold Networks with Lookup Table compilation},
+which train complex learnable functions and then compile them
+into memory tables for near-zero-cost inference.
+
+Each paradigm is introduced from first principles, with diagrams
+and analogies before equations. The article concludes with a
+discussion of how these approaches might be combined into a hybrid
+architecture for handwritten digit recognition on the MNIST dataset,
+implemented entirely in Rust.
+\end{abstract}
+
+\vfill
+\tableofcontents
+\clearpage
+
+% --- Sections ---
+\input{sections/01_introduction}
+\input{sections/02_foundations}
+\input{sections/03_binary_neural_networks}
+\input{sections/04_tsetlin_machines}
+\input{sections/05_logic_gate_networks}
+\input{sections/06_kan_lut}
+\input{sections/07_comparison}
+\input{sections/08_hybrid_vision}
+\input{sections/09_transformers_llms}
+\input{sections/10_scaling_bitwise_llms}
+\input{sections/11_conclusion}
+
+% --- Bibliography ---
+\clearpage
+\printbibliography[heading=bibintoc]
+
+\end{document}

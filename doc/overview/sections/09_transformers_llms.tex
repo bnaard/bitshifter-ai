@@ -1,0 +1,949 @@
+% ============================================================================
+\section{Understanding Transformers and Large Language Models}
+\label{sec:transformers-llms}
+% ============================================================================
+
+The previous sections developed four paradigms for replacing
+floating-point arithmetic with bitwise operations, and showed how they
+combine into a hybrid architecture for MNIST. Before we can honestly
+evaluate whether any of this scales to large language models (LLMs),
+we need to understand what LLMs actually \emph{are}---what makes them
+work, and which of their components are essential versus replaceable.
+
+This section builds that understanding from the ground up, using the
+same intuition-first approach as the rest of this article.
+
+% ----------------------------------------------------------------------------
+\subsection{From Pixels to Words: Why Language Is Harder}
+\label{sec:pixels-vs-words}
+% ----------------------------------------------------------------------------
+
+MNIST is a \emph{fixed-size classification} problem: 784 pixels in,
+one of ten labels out. Every input has the same shape, and every pixel
+has a clear spatial relationship to its neighbours.
+
+Language is fundamentally different:
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{Variable length.} A sentence can be 5~words or
+    5{,}000~words. The network must handle both.
+  \item \textbf{No fixed grid.} Words are not arranged in a 2D grid
+    like pixels. Their meaning depends on \emph{order} and
+    \emph{context}---``the dog bit the man'' and ``the man bit the
+    dog'' use the same words but mean different things.
+  \item \textbf{Long-range dependencies.} In ``The cat that the dog
+    chased ran away,'' the verb ``ran'' relates to ``cat,'' not the
+    nearby ``dog.'' The network must connect words across arbitrary
+    distances.
+  \item \textbf{Generation, not classification.} An LLM does not pick
+    one of ten labels. It generates text one word at a time, choosing
+    from a vocabulary of 30{,}000--100{,}000 possible next words at
+    each step.
+\end{itemize}
+
+\begin{keyinsight}
+The transition from MNIST to language is not just ``bigger data.'' It
+requires fundamentally different architectural primitives: a way to
+represent words as numbers, a mechanism to relate words to each other
+regardless of distance, and a method for generating sequences one
+element at a time.
+\end{keyinsight}
+
+% ----------------------------------------------------------------------------
+\subsection{Tokenisation: Turning Text into Numbers}
+\label{sec:tokenisation}
+% ----------------------------------------------------------------------------
+
+A neural network cannot process letters or words directly---it needs
+numbers. The first step in any language model is \concept{tokenisation}:
+splitting text into small pieces and assigning each piece an integer ID.
+
+Modern LLMs do not split on whole words. Instead, they use
+\concept{subword tokenisation} (algorithms like Byte-Pair Encoding or
+SentencePiece), which breaks text into frequently occurring fragments:
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  tok/.style={draw, rounded corners=2pt, minimum height=0.7cm,
+    font=\small\ttfamily, inner sep=4pt, fill=#1!10, draw=#1!60},
+  arr/.style={-{Stealth[length=4pt]}, thick, bitgray}
+]
+  % Original text
+  \node[font=\small\sffamily] at (-1.5, 1.5) {Input text:};
+  \node[font=\small\ttfamily] at (4, 1.5)
+    {``Understanding transformers is fascinating''};
+
+  % Tokens
+  \node[font=\small\sffamily] at (-1.5, 0) {Tokens:};
+  \node[tok=bitblue]   (t1) at (1.5, 0) {Under};
+  \node[tok=bitgreen]  (t2) at (3.3, 0) {stand};
+  \node[tok=bitorange] (t3) at (5.0, 0) {ing};
+  \node[tok=bitpurple] (t4) at (7.0, 0) {\_transform};
+  \node[tok=bitblue]   (t5) at (9.3, 0) {ers};
+  \node[tok=bitgreen]  (t6) at (11.0, 0) {\_is};
+  \node[tok=bitorange] (t7) at (13.0, 0) {\_fasc};
+  \node[tok=bitpurple] (t8) at (14.8, 0) {inating};
+
+  % Token IDs
+  \node[font=\small\sffamily] at (-1.5, -1.2) {Token IDs:};
+  \node[font=\small\ttfamily] at (1.5, -1.2) {8803};
+  \node[font=\small\ttfamily] at (3.3, -1.2) {1514};
+  \node[font=\small\ttfamily] at (5.0, -1.2) {278};
+  \node[font=\small\ttfamily] at (7.0, -1.2) {13389};
+  \node[font=\small\ttfamily] at (9.3, -1.2) {414};
+  \node[font=\small\ttfamily] at (11.0, -1.2) {338};
+  \node[font=\small\ttfamily] at (13.0, -1.2) {19239};
+  \node[font=\small\ttfamily] at (14.8, -1.2) {15536};
+\end{tikzpicture}
+\caption{Subword tokenisation splits text into frequently occurring
+  fragments, each mapped to an integer ID. Common words become single
+  tokens; rare words are split into subwords. The underscore
+  (\_) represents a space preceding the token.}
+\label{fig:tokenisation}
+\end{figure}
+
+\begin{analogy}
+Tokenisation is like Morse code for neural networks. Just as Morse
+represents each letter as a sequence of dots and dashes, tokenisation
+represents each text fragment as a number. The difference is that the
+``alphabet'' is learned from data: common fragments (``the'', ``ing'',
+``tion'') get their own codes, while rare fragments are spelled out
+from smaller pieces. A typical LLM vocabulary has 30{,}000--100{,}000
+tokens.
+\end{analogy}
+
+The key property is that \emph{any} text can be represented as a
+sequence of token IDs. The model's input is always a sequence of
+integers: $[t_1, t_2, \ldots, t_n]$ where each $t_i \in
+\{0, 1, \ldots, V{-}1\}$ and $V$ is the vocabulary size.
+
+% ----------------------------------------------------------------------------
+\subsection{Embeddings: Words as Points in Space}
+\label{sec:embeddings}
+% ----------------------------------------------------------------------------
+
+A token ID like 13389 is just a number---it tells us nothing about
+what the token \emph{means}. The next step is to convert each token
+into a \concept{high-dimensional vector}, called an
+\concept{embedding}.
+
+An embedding is a list of numbers (typically 768 to 4{,}096 of them)
+that represents the token as a point in a high-dimensional space. The
+critical property is that tokens with similar meanings end up at
+nearby points:
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[scale=1.0]
+  % Axes
+  \draw[-{Stealth}, thick, bitgray] (-0.3, 0) -- (8, 0);
+  \draw[-{Stealth}, thick, bitgray] (0, -0.3) -- (0, 6);
+  \node[font=\scriptsize\sffamily, bitgray, right] at (8, 0)
+    {dimension 1};
+  \node[font=\scriptsize\sffamily, bitgray, above] at (0, 6)
+    {dimension 2};
+
+  % Animal cluster
+  \fill[bitblue!15, rounded corners=10pt]
+    (0.5, 3.5) rectangle (3.5, 5.5);
+  \node[font=\scriptsize\sffamily, bitblue] at (2, 5.8) {animals};
+  \node[circle, fill=bitblue, inner sep=2pt, label={[font=\scriptsize]right:cat}]
+    at (1.5, 4.8) {};
+  \node[circle, fill=bitblue, inner sep=2pt, label={[font=\scriptsize]right:dog}]
+    at (2.2, 4.3) {};
+  \node[circle, fill=bitblue, inner sep=2pt, label={[font=\scriptsize]right:horse}]
+    at (1.8, 3.9) {};
+
+  % Vehicle cluster
+  \fill[bitorange!15, rounded corners=10pt]
+    (4.5, 3.5) rectangle (7.5, 5.5);
+  \node[font=\scriptsize\sffamily, bitorange] at (6, 5.8) {vehicles};
+  \node[circle, fill=bitorange, inner sep=2pt, label={[font=\scriptsize]right:car}]
+    at (5.5, 4.8) {};
+  \node[circle, fill=bitorange, inner sep=2pt, label={[font=\scriptsize]right:truck}]
+    at (6.2, 4.3) {};
+  \node[circle, fill=bitorange, inner sep=2pt, label={[font=\scriptsize]right:bus}]
+    at (5.8, 3.9) {};
+
+  % Royalty cluster
+  \fill[bitpurple!15, rounded corners=10pt]
+    (2.5, 0.5) rectangle (6.5, 2.5);
+  \node[font=\scriptsize\sffamily, bitpurple] at (4.5, 2.8) {royalty};
+  \node[circle, fill=bitpurple, inner sep=2pt, label={[font=\scriptsize]right:king}]
+    at (3.5, 1.8) {};
+  \node[circle, fill=bitpurple, inner sep=2pt, label={[font=\scriptsize]right:queen}]
+    at (4.2, 1.3) {};
+  \node[circle, fill=bitpurple, inner sep=2pt, label={[font=\scriptsize]right:prince}]
+    at (5.5, 1.5) {};
+
+  % Analogy arrow
+  \draw[-{Stealth}, thick, dashed, bitgreen]
+    (3.5, 1.8) -- node[font=\scriptsize\sffamily, above, sloped]
+    {king $-$ man $+$ woman $\approx$ queen} (4.2, 1.3);
+
+  % Note
+  \node[font=\scriptsize\sffamily, bitgray, text width=4cm, align=center]
+    at (8, 2.5) {(shown in 2D;\\actual embeddings\\use 768--4096\\dimensions)};
+\end{tikzpicture}
+\caption{Token embeddings place words in a high-dimensional space
+  where distance reflects semantic similarity. Similar words cluster
+  together, and vector arithmetic can capture analogies.
+  This picture is simplified to 2D; real embeddings use hundreds to
+  thousands of dimensions.}
+\label{fig:embeddings}
+\end{figure}
+
+\begin{engineernote}
+An embedding table is conceptually simple: it is a 2D array of shape
+$V \times d$, where $V$ is the vocabulary size and $d$ is the
+embedding dimension. Looking up a token's embedding is a single
+table lookup---no computation, just a memory read of $d$ numbers.
+In a model with $V = 50{,}000$ and $d = 4{,}096$, the embedding
+table alone uses $50{,}000 \times 4{,}096 \times 2 = 400$\,MB
+(in 16-bit precision).
+\end{engineernote}
+
+The embedding is not fixed forever. The embedding table is \emph{learned}
+during training: the model adjusts the position of every token in this
+high-dimensional space so that tokens appearing in similar contexts
+end up nearby. This learned structure is called \concept{distributional
+semantics}---the meaning of a word is defined by the company it keeps.
+
+\subsubsection{Why High Dimensions Matter}
+
+Two dimensions can separate cats from cars. But to simultaneously
+encode that ``bank'' can mean a financial institution \emph{or} a
+river bank, that ``run'' can be a verb \emph{or} a noun, and that
+``Java'' can be a programming language \emph{or} an island---you need
+many dimensions. Each dimension can encode a different aspect of
+meaning, and a token's position in this space encodes all its
+potential meanings simultaneously.
+
+This is the first point of tension with bitwise approaches:
+\emph{embeddings are inherently continuous}. The difference between
+``happy'' and ``joyful'' is a small vector in this space; booleanising
+it (rounding each dimension to 0 or~1) would destroy these fine
+distinctions.
+
+% ----------------------------------------------------------------------------
+\subsection{The Transformer Block: The Engine of Modern AI}
+\label{sec:transformer-block}
+% ----------------------------------------------------------------------------
+
+The transformer~\cite{vaswani2017attention} is the architecture
+behind essentially all modern LLMs (GPT, Claude, Llama, etc.). A
+transformer is a stack of identical \concept{transformer blocks}, each
+containing two main sub-layers:
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Self-attention}: lets each token look at every other
+    token and decide which ones are relevant.
+  \item \textbf{Feed-forward network (MLP)}: processes each token
+    independently through a small neural network.
+\end{enumerate}
+
+Each sub-layer is wrapped in a \concept{residual connection} (add the
+input back to the output) and \concept{layer normalisation} (rescale
+the values to prevent them from growing too large or too small).
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  block/.style={draw, rounded corners=3pt, minimum width=4cm,
+    minimum height=0.8cm, font=\small\sffamily, align=center},
+  arr/.style={-{Stealth[length=5pt]}, thick},
+  plus/.style={circle, draw, minimum size=0.5cm, font=\small,
+    fill=bitgreen!10, inner sep=0pt},
+  skip/.style={thick, bitgray, dashed}
+]
+  % Input
+  \node[font=\small\sffamily, bitgray] (in) at (0, 0) {token embeddings};
+
+  % Self-attention
+  \node[block, fill=bitblue!10, draw=bitblue] (attn)
+    at (0, 1.5) {Self-Attention};
+  \node[plus] (add1) at (0, 2.8) {$+$};
+  \node[block, fill=bitgray!10, draw=bitgray] (ln1)
+    at (0, 3.8) {Layer Normalisation};
+
+  % MLP
+  \node[block, fill=bitorange!10, draw=bitorange] (mlp)
+    at (0, 5.0) {Feed-Forward Network (MLP)};
+  \node[plus] (add2) at (0, 6.3) {$+$};
+  \node[block, fill=bitgray!10, draw=bitgray] (ln2)
+    at (0, 7.3) {Layer Normalisation};
+
+  % Output
+  \node[font=\small\sffamily, bitgray] (out) at (0, 8.5)
+    {to next block};
+
+  % Main flow
+  \draw[arr] (in) -- (attn);
+  \draw[arr] (attn) -- (add1);
+  \draw[arr] (add1) -- (ln1);
+  \draw[arr] (ln1) -- (mlp);
+  \draw[arr] (mlp) -- (add2);
+  \draw[arr] (add2) -- (ln2);
+  \draw[arr] (ln2) -- (out);
+
+  % Residual connections
+  \draw[skip] (-2.8, 0.3) -- (-2.8, 2.8);
+  \draw[skip, -{Stealth[length=4pt]}] (-2.8, 2.8) -- (add1);
+  \draw[skip] (-2.8, 4.1) -- (-2.8, 6.3);
+  \draw[skip, -{Stealth[length=4pt]}] (-2.8, 6.3) -- (add2);
+
+  % Labels
+  \node[font=\scriptsize\sffamily, bitgray, left] at (-3.2, 1.5)
+    {residual};
+  \node[font=\scriptsize\sffamily, bitgray, left] at (-3.2, 5.2)
+    {residual};
+
+  % Bracket for "one block"
+  \draw[decorate, decoration={brace, amplitude=8pt, mirror},
+    thick, bitpurple]
+    (3, 0.7) -- (3, 8.0);
+  \node[font=\small\sffamily, bitpurple, right, text width=3cm]
+    at (3.5, 4.3)
+    {one transformer\\block\\[4pt]\scriptsize (repeated\\32--80 times)};
+\end{tikzpicture}
+\caption{A single transformer block. The self-attention sub-layer lets
+  tokens communicate with each other; the MLP sub-layer processes each
+  token independently. Residual connections and layer normalisation
+  stabilise training. A full LLM stacks 32--80 of these blocks.}
+\label{fig:transformer-block}
+\end{figure}
+
+\begin{analogy}
+Think of a transformer block as a two-step meeting process. In the
+\emph{self-attention} step, every participant in the room looks
+around, identifies who has relevant information, and takes notes.
+In the \emph{MLP} step, each participant goes back to their desk
+and privately thinks about what they learned. Then the whole process
+repeats---another round of group discussion followed by private
+reflection. After 32--80 rounds, each participant has a rich
+understanding of the entire conversation.
+
+The residual connection is like keeping your original notes alongside
+the new ones---you never lose what you started with. Layer
+normalisation is like agreeing on a common scale for everyone's
+notes so that one loud participant does not dominate.
+\end{analogy}
+
+Let us examine each component in detail.
+
+% ----------------------------------------------------------------------------
+\subsection{Self-Attention: The Core Innovation}
+\label{sec:self-attention}
+% ----------------------------------------------------------------------------
+
+Self-attention is the mechanism that lets each token in a sequence
+attend to every other token. It answers the question: \emph{``For each
+word I am processing, which other words in the sequence should
+influence my understanding of it?''}
+
+\subsubsection{The Intuition}
+
+Consider the sentence: ``The animal didn't cross the street because
+it was too wide.'' What does ``it'' refer to? A human instantly knows
+``it'' means ``the street'' (streets are wide, not animals). But how
+does a neural network figure this out?
+
+Self-attention lets the token ``it'' \emph{look at every other token}
+and assign each one a relevance score. It assigns high relevance to
+``street'' and low relevance to ``animal,'' then uses these scores to
+blend information from the relevant tokens into its own representation.
+
+\subsubsection{The Mechanism: Queries, Keys, and Values}
+
+Self-attention works through three learned projections. For each token,
+the model computes:
+
+\begin{itemize}[leftmargin=2em]
+  \item A \concept{query} ($\bm{q}$): ``What am I looking for?''
+  \item A \concept{key} ($\bm{k}$): ``What do I contain?''
+  \item A \concept{value} ($\bm{v}$): ``What information do I
+    provide if selected?''
+\end{itemize}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  tok/.style={draw, rounded corners=2pt, minimum width=1.2cm,
+    minimum height=0.6cm, font=\scriptsize\sffamily, fill=#1!10},
+  mat/.style={draw, rounded corners=2pt, minimum width=1cm,
+    minimum height=0.6cm, font=\scriptsize\sffamily, fill=#1!15},
+  arr/.style={-{Stealth[length=4pt]}, thick},
+  score/.style={font=\scriptsize\ttfamily}
+]
+  % Tokens
+  \foreach \i/\w in {1/The, 2/cat, 3/sat, 4/on, 5/it} {
+    \node[tok=bitgray] (t\i) at ({(\i-1)*2.5}, 0) {\w};
+  }
+
+  % Query from "it"
+  \node[mat=bitblue, minimum width=1.5cm] (q) at (10, 1.5)
+    {query: ``it''};
+  \draw[arr, bitblue] (t5.north) -- (q.south);
+
+  % Keys from all
+  \foreach \i/\w in {1/The, 2/cat, 3/sat, 4/on, 5/it} {
+    \node[mat=bitgreen] (k\i) at ({(\i-1)*2.5}, 2.5)
+      {key: ``\w''};
+    \draw[arr, bitgreen] (t\i.north) -- (k\i.south);
+  }
+
+  % Attention scores
+  \node[font=\small\sffamily, bitgray] at (5, 4) {attention scores
+    (query $\cdot$ key):};
+  \foreach \i/\s/\h in {1/0.02/2, 2/0.71/35, 3/0.05/3, 4/0.03/2, 5/0.19/10} {
+    \fill[bitblue!\h] ({(\i-1)*2.5-0.4}, 4.5) rectangle
+      ({(\i-1)*2.5+0.4}, {4.5+\s*1.5});
+    \node[score] at ({(\i-1)*2.5}, {4.5+\s*1.5+0.3}) {\s};
+  }
+
+  % Label
+  \node[font=\scriptsize\sffamily, bitgray, text width=4cm, align=left]
+    at (12.5, 3.5) {``it'' attends\\most strongly\\to ``cat''\\($\leftarrow$ correct\\referent)};
+\end{tikzpicture}
+\caption{Self-attention for the token ``it''. Its query is compared
+  (via dot product) with every token's key to produce attention scores.
+  The highest score (0.71) goes to ``cat''---the token ``it'' refers to.
+  These scores then weight each token's value to produce the output.}
+\label{fig:attention-scores}
+\end{figure}
+
+\subsubsection{The Mathematics}
+
+Given a sequence of $n$ token embeddings packed into a matrix
+$\bm{X} \in \mathbb{R}^{n \times d}$, self-attention computes:
+
+\begin{align}
+  \bm{Q} &= \bm{X}\bm{W}_Q, \quad
+  \bm{K} = \bm{X}\bm{W}_K, \quad
+  \bm{V} = \bm{X}\bm{W}_V
+  \label{eq:qkv}\\[6pt]
+  \text{Attention}(\bm{Q}, \bm{K}, \bm{V})
+  &= \underbrace{\text{softmax}\!\left(
+    \frac{\bm{Q}\bm{K}^\top}{\sqrt{d_k}}
+  \right)}_{\text{attention weights}}
+  \bm{V}
+  \label{eq:attention}
+\end{align}
+
+where $\bm{W}_Q, \bm{W}_K, \bm{W}_V \in \mathbb{R}^{d \times d_k}$
+are learned projection matrices, and $d_k$ is the dimension of each
+head (typically $d / h$ where $h$ is the number of attention heads).
+
+Let us unpack each step:
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Project.} Multiply the input by three weight matrices
+    to get queries, keys, and values. This is standard matrix
+    multiplication---the same MAC operation we have been trying to
+    eliminate.
+
+  \item \textbf{Score.} Compute $\bm{Q}\bm{K}^\top$: the dot product
+    of every query with every key. This produces an $n \times n$
+    matrix of raw relevance scores. For a sequence of 4{,}096 tokens,
+    this is a $4{,}096 \times 4{,}096$ matrix---about 16~million
+    scores.
+
+  \item \textbf{Scale.} Divide by $\sqrt{d_k}$ to prevent the dot
+    products from growing too large (which would push softmax into
+    regions where its gradient vanishes).
+
+  \item \textbf{Softmax.} Apply the softmax function to each row:
+    \begin{equation}
+      \text{softmax}(z_i) = \frac{e^{z_i}}{\sum_j e^{z_j}}
+      \label{eq:softmax}
+    \end{equation}
+    This converts raw scores into a probability distribution: all
+    positive, summing to~1. The token with the highest relevance
+    gets the most weight.
+
+  \item \textbf{Aggregate.} Multiply the attention weights by the
+    value matrix. Each token's output is a weighted average of all
+    tokens' values, where the weights reflect relevance.
+\end{enumerate}
+
+\begin{keyinsight}
+The softmax function is the critical bottleneck for binarisation.
+It requires:
+\begin{itemize}[leftmargin=1em]
+  \item Exponentiation ($e^{z_i}$)---a transcendental function that
+    maps integers to irrational numbers.
+  \item Division---to normalise the probabilities.
+  \item Continuous outputs---the weights 0.71 and 0.72 must be
+    distinguishable, not rounded to the same bit.
+\end{itemize}
+Every other step (projection, scoring, aggregation) is matrix
+multiplication, which \emph{can} be approximated with integer or
+ternary arithmetic (as BitNet demonstrates). The softmax is where
+floating-point computation concentrates.
+\end{keyinsight}
+
+\subsubsection{Multi-Head Attention}
+
+In practice, the model does not compute one set of queries, keys, and
+values. It computes $h$ sets in parallel (typically $h = 32$ to 128),
+each with a smaller dimension $d_k = d/h$. These are called
+\concept{attention heads}.
+
+\begin{analogy}
+Multi-head attention is like having multiple reading comprehension
+specialists. One head might focus on syntactic relationships (subject
+and verb agreement), another on semantic similarity (synonyms and
+related concepts), a third on positional relationships (nearby words).
+Each head independently decides what is relevant, and their
+conclusions are concatenated and combined.
+\end{analogy}
+
+The output of multi-head attention is:
+\begin{equation}
+  \text{MultiHead}(\bm{X}) =
+  [\text{head}_1; \text{head}_2; \ldots; \text{head}_h]\bm{W}_O
+\end{equation}
+where each $\text{head}_i = \text{Attention}(\bm{X}\bm{W}_Q^i,
+\bm{X}\bm{W}_K^i, \bm{X}\bm{W}_V^i)$ and $\bm{W}_O \in
+\mathbb{R}^{d \times d}$ is a learned output projection.
+
+% ----------------------------------------------------------------------------
+\subsection{The Feed-Forward Network (MLP Block)}
+\label{sec:ffn}
+% ----------------------------------------------------------------------------
+
+After attention lets tokens communicate, each token is processed
+\emph{independently} through a small two-layer neural network:
+
+\begin{equation}
+  \text{FFN}(\bm{x}) = \sigma(\bm{x}\bm{W}_1 + \bm{b}_1)\bm{W}_2 + \bm{b}_2
+  \label{eq:ffn}
+\end{equation}
+
+where $\sigma$ is a nonlinear activation function (typically GELU or
+SiLU), $\bm{W}_1 \in \mathbb{R}^{d \times d_{\text{ff}}}$ and
+$\bm{W}_2 \in \mathbb{R}^{d_{\text{ff}} \times d}$.
+
+The inner dimension $d_{\text{ff}}$ is typically $4 \times d$. For a
+model with $d = 4{,}096$, this means $\bm{W}_1$ has $4{,}096 \times
+16{,}384 = 67$~million parameters---\emph{per layer}.
+
+\begin{engineernote}
+The MLP block is where most of the model's parameters and computation
+live. In a typical transformer, the MLP accounts for about two-thirds
+of the total parameters and floating-point operations. This makes it
+the highest-value target for binarisation: if you can make the MLP
+bitwise, you have eliminated the majority of the floating-point work.
+\end{engineernote}
+
+\begin{analogy}
+If self-attention is the ``group discussion'' where tokens share
+information, the MLP is the ``private thinking'' where each token
+processes what it learned. The attention layer moves information
+\emph{between} tokens; the MLP transforms information \emph{within}
+each token.
+\end{analogy}
+
+% ----------------------------------------------------------------------------
+\subsection{Residual Connections and Layer Normalisation}
+\label{sec:residual-layernorm}
+% ----------------------------------------------------------------------------
+
+Two seemingly minor components turn out to be essential for making
+deep transformers trainable.
+
+\subsubsection{Residual Connections}
+
+A residual connection simply adds the input of a sub-layer back to
+its output:
+\begin{equation}
+  \bm{y} = \bm{x} + \text{SubLayer}(\bm{x})
+  \label{eq:residual}
+\end{equation}
+
+This means the sub-layer only needs to learn the \emph{difference}
+from the input, not the entire transformation. Without residual
+connections, gradients vanish in deep networks---a 96-layer
+transformer would be untrainable.
+
+\subsubsection{Layer Normalisation}
+
+Layer normalisation~\cite{ba2016layernorm} rescales each token's
+representation to have zero mean and unit variance:
+\begin{equation}
+  \text{LayerNorm}(\bm{x}) =
+  \frac{\bm{x} - \mu}{\sqrt{\sigma^2 + \epsilon}} \odot \bm{\gamma} + \bm{\beta}
+  \label{eq:layernorm}
+\end{equation}
+where $\mu$ and $\sigma^2$ are the mean and variance computed across
+the embedding dimensions of a single token, $\bm{\gamma}$ and
+$\bm{\beta}$ are learned scale and shift parameters, and $\epsilon$
+is a small constant for numerical stability.
+
+\begin{engineernote}
+Layer normalisation is another floating-point bottleneck. It requires:
+\begin{itemize}[leftmargin=1em]
+  \item Computing mean and variance (requires division and square root).
+  \item The division $(\bm{x} - \mu) / \sqrt{\sigma^2 + \epsilon}$
+    produces continuous values even if $\bm{x}$ is integer.
+  \item The learned parameters $\bm{\gamma}$ and $\bm{\beta}$ are
+    continuous.
+\end{itemize}
+However, approximations exist: \concept{RMSNorm} (used in Llama and
+many modern LLMs) drops the mean subtraction and simplifies to
+$\bm{x} / \text{RMS}(\bm{x}) \cdot \bm{\gamma}$, which is slightly
+simpler. Integer approximations of RMSNorm have been demonstrated
+in quantisation research, though with some accuracy trade-off.
+\end{engineernote}
+
+% ----------------------------------------------------------------------------
+\subsection{Autoregressive Generation: One Token at a Time}
+\label{sec:autoregressive}
+% ----------------------------------------------------------------------------
+
+An LLM generates text through \concept{autoregressive generation}:
+it predicts the next token, appends it to the sequence, and repeats.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  tok/.style={draw, rounded corners=2pt, minimum height=0.6cm,
+    font=\scriptsize\sffamily, inner sep=3pt},
+  pred/.style={tok, fill=bitgreen!20, draw=bitgreen},
+  ctx/.style={tok, fill=bitblue!10, draw=bitblue},
+  arr/.style={-{Stealth[length=4pt]}, thick, bitgray}
+]
+  % Step 1
+  \node[font=\scriptsize\sffamily\bfseries, left] at (-0.5, 3)
+    {Step 1:};
+  \node[ctx] (s1a) at (1.5, 3) {The};
+  \node[ctx] (s1b) at (3, 3) {cat};
+  \node[pred] (s1c) at (4.5, 3) {sat};
+  \draw[arr] (s1b) -- (s1c);
+
+  % Step 2
+  \node[font=\scriptsize\sffamily\bfseries, left] at (-0.5, 2)
+    {Step 2:};
+  \node[ctx] (s2a) at (1.5, 2) {The};
+  \node[ctx] (s2b) at (3, 2) {cat};
+  \node[ctx] (s2c) at (4.5, 2) {sat};
+  \node[pred] (s2d) at (6, 2) {on};
+  \draw[arr] (s2c) -- (s2d);
+
+  % Step 3
+  \node[font=\scriptsize\sffamily\bfseries, left] at (-0.5, 1)
+    {Step 3:};
+  \node[ctx] (s3a) at (1.5, 1) {The};
+  \node[ctx] (s3b) at (3, 1) {cat};
+  \node[ctx] (s3c) at (4.5, 1) {sat};
+  \node[ctx] (s3d) at (6, 1) {on};
+  \node[pred] (s3e) at (7.5, 1) {the};
+  \draw[arr] (s3d) -- (s3e);
+
+  % Step 4
+  \node[font=\scriptsize\sffamily\bfseries, left] at (-0.5, 0)
+    {Step 4:};
+  \node[ctx] (s4a) at (1.5, 0) {The};
+  \node[ctx] (s4b) at (3, 0) {cat};
+  \node[ctx] (s4c) at (4.5, 0) {sat};
+  \node[ctx] (s4d) at (6, 0) {on};
+  \node[ctx] (s4e) at (7.5, 0) {the};
+  \node[pred] (s4f) at (9, 0) {mat};
+  \draw[arr] (s4e) -- (s4f);
+
+  % Legend
+  \node[ctx, right] at (10.5, 3) {context};
+  \node[pred, right] at (10.5, 2.2) {predicted};
+\end{tikzpicture}
+\caption{Autoregressive generation. At each step, the model sees all
+  previous tokens (the context) and predicts the next one. The
+  predicted token is appended to the context, and the process repeats.
+  Generating a 1{,}000-token response requires 1{,}000 forward passes.}
+\label{fig:autoregressive}
+\end{figure}
+
+At each step, the model processes the entire context through all
+transformer blocks and produces a probability distribution over the
+vocabulary:
+
+\begin{equation}
+  P(t_{n+1} \mid t_1, \ldots, t_n) =
+  \text{softmax}(\bm{h}_n \bm{W}_{\text{vocab}})
+  \label{eq:next-token}
+\end{equation}
+
+where $\bm{h}_n$ is the hidden state of the last token after the
+final transformer block, and $\bm{W}_{\text{vocab}} \in
+\mathbb{R}^{d \times V}$ projects it into a score for each vocabulary
+item.
+
+\begin{keyinsight}
+Autoregressive generation means the model's speed is determined by
+\emph{latency per token}, not throughput. Even if you can process a
+batch of tokens quickly (the ``prefill'' phase), generation is
+inherently sequential: you cannot predict token~$n{+}1$ until you
+have produced token~$n$. This is why LLM inference is
+\emph{memory-bandwidth-bound}, not compute-bound---the bottleneck is
+reading the model's weights from memory for each generated token, not
+the arithmetic itself. This memory-bandwidth bottleneck is exactly
+where bitwise models with smaller weights have the most to offer.
+\end{keyinsight}
+
+\subsubsection{The Causal Mask}
+
+During generation, a token must only attend to tokens \emph{before}
+it---it cannot look ahead at tokens that have not been generated yet.
+This is enforced by a \concept{causal mask}: the attention scores for
+future positions are set to $-\infty$ before the softmax, which drives
+their attention weights to zero.
+
+\begin{equation}
+  \text{CausalAttention}(\bm{Q}, \bm{K}, \bm{V}) =
+  \text{softmax}\!\left(
+    \frac{\bm{Q}\bm{K}^\top}{\sqrt{d_k}} + \bm{M}
+  \right)\bm{V}
+\end{equation}
+
+where $M_{ij} = 0$ if $i \geq j$ and $M_{ij} = -\infty$ otherwise.
+
+% ----------------------------------------------------------------------------
+\subsection{Putting It All Together: The Full LLM}
+\label{sec:full-llm}
+% ----------------------------------------------------------------------------
+
+A complete LLM is assembled from the components we have described:
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  comp/.style={draw, rounded corners=3pt, minimum width=5cm,
+    minimum height=0.7cm, font=\small\sffamily, align=center},
+  arr/.style={-{Stealth[length=5pt]}, thick},
+  brace/.style={decorate, decoration={brace, amplitude=6pt, mirror}}
+]
+  % Stack
+  \node[comp, fill=bitgray!8] (tok) at (0, 0)
+    {Tokeniser: text $\to$ [token IDs]};
+  \node[comp, fill=bitpurple!8] (emb) at (0, 1.2)
+    {Embedding table: [IDs] $\to$ [vectors]};
+  \node[comp, fill=bitblue!8] (b1) at (0, 2.4)
+    {Transformer block 1};
+  \node[comp, fill=bitblue!8] (b2) at (0, 3.4)
+    {Transformer block 2};
+  \node[font=\sffamily, bitgray] (dots) at (0, 4.2) {$\vdots$};
+  \node[comp, fill=bitblue!8] (bn) at (0, 5.0)
+    {Transformer block $N$};
+  \node[comp, fill=bitgray!8] (ln) at (0, 6.2)
+    {Final layer norm};
+  \node[comp, fill=bitgreen!8] (head) at (0, 7.4)
+    {Output head: vector $\to$ vocabulary scores};
+  \node[comp, fill=bitorange!8] (sm) at (0, 8.6)
+    {Softmax $\to$ next token probability};
+
+  % Arrows
+  \draw[arr] (tok) -- (emb);
+  \draw[arr] (emb) -- (b1);
+  \draw[arr] (b1) -- (b2);
+  \draw[arr] (b2) -- (dots);
+  \draw[arr] (dots) -- (bn);
+  \draw[arr] (bn) -- (ln);
+  \draw[arr] (ln) -- (head);
+  \draw[arr] (head) -- (sm);
+
+  % Annotations
+  \draw[brace, thick, bitblue]
+    (3.3, 2.1) -- (3.3, 5.3);
+  \node[font=\scriptsize\sffamily, bitblue, right, text width=3.5cm]
+    at (3.8, 3.7)
+    {$N$ = 32 (7B model)\\$N$ = 80 (70B model)\\$N$ = 126 (405B model)};
+
+  % Operation counts
+  \node[font=\scriptsize\sffamily, bitgray, left, text width=3cm,
+    align=right] at (-3.5, 1.2) {lookup only\\(no FP)};
+  \node[font=\scriptsize\sffamily, bitgray, left, text width=3cm,
+    align=right] at (-3.5, 3.7) {matrix multiply\\+ softmax\\+ layer norm};
+  \node[font=\scriptsize\sffamily, bitgray, left, text width=3cm,
+    align=right] at (-3.5, 8.6) {softmax\\(continuous)};
+\end{tikzpicture}
+\caption{The complete LLM architecture. Token IDs enter at the bottom,
+  pass through $N$ transformer blocks, and produce a probability
+  distribution over the next token at the top. The vast majority of
+  computation happens in the transformer blocks (middle).}
+\label{fig:full-llm}
+\end{figure}
+
+\Cref{tab:llm-sizes} shows the scale of modern LLMs.
+
+\begin{table}[htbp]
+\centering
+\caption{Scale of representative LLMs. Parameter counts determine
+  memory requirements; token counts determine the knowledge absorbed
+  during training.}
+\label{tab:llm-sizes}
+\begin{tabular}{@{}lrrrrr@{}}
+  \toprule
+  \textbf{Model} & \textbf{Params} & \textbf{Layers} & \textbf{$d$}
+    & \textbf{Heads} & \textbf{Training tokens} \\
+  \midrule
+  GPT-2       & 1.5B    & 48  & 1{,}600  & 25  & 40B \\
+  Llama 2 7B  & 7B      & 32  & 4{,}096  & 32  & 2T \\
+  Llama 2 70B & 70B     & 80  & 8{,}192  & 64  & 2T \\
+  Llama 3 405B& 405B    & 126 & 16{,}384 & 128 & 15T \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\begin{engineernote}
+A 7-billion-parameter model stored in 16-bit floating point requires
+$7 \times 10^9 \times 2 = 14$\,GB of memory---just for the weights.
+Add activations, key-value cache, and optimizer state, and training
+requires 4--8$\times$ more. This is why bitwise models are so
+appealing: ternary weights ($\{-1, 0, +1\}$) need only 1.58~bits
+per parameter, reducing the 7B model from 14\,GB to under 2\,GB.
+\end{engineernote}
+
+% ----------------------------------------------------------------------------
+\subsection{Mixture of Experts: Scaling Without Proportional Cost}
+\label{sec:moe}
+% ----------------------------------------------------------------------------
+
+As models grow larger, a key insight emerged: not every token needs
+every parameter. \concept{Mixture of Experts} (MoE) replaces the
+single MLP block in each transformer layer with multiple ``expert''
+MLPs, and a small \concept{gating network} (also called a router)
+decides which experts process each token.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  expert/.style={draw, rounded corners=3pt, minimum width=1.8cm,
+    minimum height=1.2cm, font=\scriptsize\sffamily, align=center,
+    fill=#1!10, draw=#1},
+  gate/.style={draw, rounded corners=3pt, minimum width=2.5cm,
+    minimum height=0.8cm, font=\small\sffamily, fill=bitgray!10},
+  arr/.style={-{Stealth[length=4pt]}, thick},
+  sel/.style={arr, bitgreen, line width=1.5pt},
+  dim/.style={arr, bitgray!40, dashed}
+]
+  % Input
+  \node[font=\small\sffamily] (in) at (5, -0.5) {token $\bm{x}$};
+
+  % Gate
+  \node[gate] (g) at (5, 1.2) {Router / Gate};
+  \draw[arr] (in) -- (g);
+
+  % Experts
+  \node[expert=bitblue]   (e1) at (0,  3.5) {Expert 1\\(MLP)};
+  \node[expert=bitgreen]  (e2) at (2.5, 3.5) {Expert 2\\(MLP)};
+  \node[expert=bitorange] (e3) at (5,  3.5) {Expert 3\\(MLP)};
+  \node[expert=bitpurple] (e4) at (7.5, 3.5) {Expert 4\\(MLP)};
+  \node[expert=bitgray]   (e5) at (10, 3.5) {Expert 5\\(MLP)};
+
+  % Gate to experts
+  \draw[dim] (g.north) -- (e1.south);
+  \draw[sel] (g.north) -- (e2.south);
+  \draw[dim] (g.north) -- (e3.south);
+  \draw[sel] (g.north) -- (e4.south);
+  \draw[dim] (g.north) -- (e5.south);
+
+  % Labels for selected
+  \node[font=\scriptsize\sffamily, bitgreen, above right] at (e2.north)
+    {selected};
+  \node[font=\scriptsize\sffamily, bitgreen, above right] at (e4.north)
+    {selected};
+
+  % Output
+  \node[font=\small\sffamily] (out) at (5, 5.5)
+    {weighted sum of expert outputs};
+  \draw[arr] (e2.north) -- (out.south west);
+  \draw[arr] (e4.north) -- (out.south east);
+
+  % Annotation
+  \node[font=\scriptsize\sffamily, bitgray, text width=4cm, align=left]
+    at (12, 2.5) {Top-$k$ routing:\\each token uses\\only 2 of 5 experts\\($\sim$40\% of params\\activated per token)};
+\end{tikzpicture}
+\caption{Mixture of Experts (MoE). A gating network routes each
+  token to the top-$k$ experts (typically $k=2$). The model has many
+  parameters (all experts combined) but each token only activates a
+  fraction of them, keeping per-token computation manageable.}
+\label{fig:moe}
+\end{figure}
+
+The gating function is typically a simple linear layer followed by
+softmax:
+\begin{equation}
+  G(\bm{x}) = \text{softmax}(\bm{x}\bm{W}_g)
+  \label{eq:gating}
+\end{equation}
+where $\bm{W}_g \in \mathbb{R}^{d \times E}$ and $E$ is the number
+of experts. The top-$k$ values of $G(\bm{x})$ determine which experts
+are activated and how their outputs are weighted.
+
+\begin{keyinsight}
+MoE decouples \emph{total model knowledge} from \emph{per-token
+computation}. A model can have 400B total parameters but only activate
+20B per token. This is relevant for bitwise approaches because:
+\begin{itemize}[leftmargin=1em]
+  \item The router/gating network is a small classification problem
+    (``which expert should handle this token?'')---exactly the kind
+    of task where Tsetlin Machines or Logic Gate Networks could excel.
+  \item Each expert MLP is independent and could be individually
+    compiled to logic gates or LUTs.
+  \item The ``sparse activation'' principle aligns with bitwise
+    networks' strength: small, cache-resident models that run fast.
+\end{itemize}
+\end{keyinsight}
+
+\begin{analogy}
+MoE is like a hospital with specialist departments. A patient (token)
+does not see every doctor---a triage nurse (the router) assesses
+symptoms and sends them to the relevant specialists. The hospital has
+enormous total expertise (parameters), but each patient only uses a
+small fraction. This is vastly more efficient than making every doctor
+examine every patient.
+\end{analogy}
+
+% ----------------------------------------------------------------------------
+\subsection{Where the Floating Point Lives}
+\label{sec:where-fp-lives}
+% ----------------------------------------------------------------------------
+
+Now that we understand the full transformer architecture, we can
+precisely identify where floating-point arithmetic is required and
+where it might be eliminated. \Cref{tab:fp-map} provides this
+breakdown.
+
+\begin{table}[htbp]
+\centering
+\caption{Floating-point dependency map of a transformer. Components
+  marked ``essential'' have no known integer-only replacement that
+  preserves competitive accuracy at LLM scale.}
+\label{tab:fp-map}
+\begin{tabular}{@{}p{3.2cm}p{2.5cm}p{6.5cm}@{}}
+  \toprule
+  \textbf{Component} & \textbf{FP required?} & \textbf{Notes} \\
+  \midrule
+  Embedding lookup     & No  & Pure table lookup (integer index $\to$ vector). \\
+  QKV projection       & Replaceable & Matrix multiply; BitNet uses ternary weights. \\
+  $\bm{Q}\bm{K}^\top$ dot product & Replaceable & Integer dot product with ternary weights works. \\
+  Softmax              & \textbf{Essential} & Requires $e^x$ and division. No proven integer replacement at LLM scale. \\
+  Value aggregation    & Replaceable & Weighted sum; weights from softmax remain continuous. \\
+  Output projection    & Replaceable & Matrix multiply; can use ternary weights. \\
+  Layer normalisation  & \textbf{Difficult} & Requires mean, variance, division, square root. Integer approximations exist but with accuracy cost. \\
+  MLP weights          & Replaceable & BitNet uses ternary $\{-1,0,+1\}$. \\
+  MLP activation       & Replaceable & Could be replaced with LUT-compiled functions. \\
+  MoE gating           & Replaceable & Small classification; softmax over few experts. \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\begin{keyinsight}
+Of all the components in a transformer, only two \emph{fundamentally}
+resist binarisation: the \textbf{attention softmax} and
+\textbf{layer normalisation}. Everything else---projections, MLP
+weights, activations, embedding lookups---can be implemented with
+integer, ternary, or table-lookup operations. Understanding whether
+these last two bastions of floating-point can be conquered is the
+central question for building a fully bitwise LLM.
+\end{keyinsight}

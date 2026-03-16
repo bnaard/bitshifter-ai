@@ -1,0 +1,136 @@
+% ============================================================================
+\section{Introduction: Why Rethink Neural Computation?}
+\label{sec:introduction}
+% ============================================================================
+
+Every time you ask a voice assistant a question, every time your phone
+recognises a face, every time a language model generates a sentence,
+trillions of tiny multiplications happen inside specialised hardware.
+These multiplications---floating-point numbers multiplied by
+floating-point weights and summed up---are the heartbeat of modern AI.
+The industry calls this operation \concept{multiply-accumulate} (MAC),
+and virtually every neural network alive today is built on it.
+
+This dependence has consequences:
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{Energy:} A single floating-point multiplication consumes
+    roughly 20$\times$ more energy than a bitwise logic operation (AND, OR,
+    XOR) on the same chip~\cite{horowitz2014energy}.
+  \item \textbf{Hardware monopoly:} Training and running large models
+    requires GPUs, a market dominated by a single manufacturer. This
+    creates bottlenecks in supply, cost, and access.
+  \item \textbf{Deployment barriers:} A 70-billion-parameter model
+    requires 140\,GB of memory in standard 16-bit floating-point
+    representation. That is an entire server rack, not a phone or
+    a sensor on a factory floor.
+\end{itemize}
+
+\begin{keyinsight}
+The question this article explores is not ``How do we build faster
+GPUs?'' but rather ``Can we build neural networks that do not need
+GPUs at all?''---networks that run on the bitwise logic instructions
+every CPU already has.
+\end{keyinsight}
+
+\subsection{The Four Paradigms}
+
+Over the past decade, four distinct research directions have emerged,
+each attacking the MAC bottleneck from a different angle.
+\Cref{fig:paradigm-map} shows how they relate.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  box/.style={
+    draw, rounded corners=4pt, minimum width=3.8cm, minimum height=1.6cm,
+    align=center, font=\small\sffamily, line width=0.8pt
+  },
+  arrow/.style={-{Stealth[length=5pt]}, thick, bitgray},
+  label/.style={font=\scriptsize\sffamily, bitgray}
+]
+  % Boxes
+  \node[box, fill=bitblue!10, draw=bitblue] (bnn)
+    at (0,0) {\textbf{Binary Neural}\\\textbf{Networks}\\[2pt]\scriptsize XNOR + popcount};
+  \node[box, fill=bitgreen!10, draw=bitgreen] (tm)
+    at (5.5,0) {\textbf{Tsetlin}\\\textbf{Machines}\\[2pt]\scriptsize Logic clauses};
+  \node[box, fill=bitorange!10, draw=bitorange] (lgn)
+    at (0,-3.5) {\textbf{Logic Gate}\\\textbf{Networks}\\[2pt]\scriptsize Learnable gates};
+  \node[box, fill=bitpurple!10, draw=bitpurple] (kan)
+    at (5.5,-3.5) {\textbf{KAN / LUT}\\\textbf{Compilation}\\[2pt]\scriptsize Train complex,\\[-1pt]\scriptsize deploy as tables};
+
+  % Central node
+  \node[draw, circle, minimum size=1.8cm, fill=lightbg,
+        font=\small\sffamily\bfseries, align=center, line width=1pt]
+    (center) at (2.75,-1.75) {Hybrid\\Model};
+
+  % Arrows to center
+  \draw[arrow, bitblue]   (bnn.south east)  -- (center);
+  \draw[arrow, bitgreen]  (tm.south west)   -- (center);
+  \draw[arrow, bitorange] (lgn.north east)  -- (center);
+  \draw[arrow, bitpurple] (kan.north west)  -- (center);
+
+  % Labels on arrows
+  \node[label, above, rotate=-35] at ($(bnn.south east)!0.5!(center)$) {binary weights};
+  \node[label, above, rotate=35]  at ($(tm.south west)!0.5!(center)$) {clause logic};
+  \node[label, below, rotate=35]  at ($(lgn.north east)!0.5!(center)$) {gate learning};
+  \node[label, below, rotate=-35] at ($(kan.north west)!0.5!(center)$) {LUT inference};
+\end{tikzpicture}
+\caption{The four paradigms of bitwise neural computation and their
+  convergence toward a hybrid architecture. Each contributes a different
+  capability: binary arithmetic, interpretable logic, learnable
+  structure, and efficient deployment.}
+\label{fig:paradigm-map}
+\end{figure}
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Binary Neural Networks (BNNs)}~\cite{courbariaux2016bnn} constrain weights and
+    sometimes activations to just two values ($+1$ and $-1$). This turns
+    multiplication into an XNOR gate and addition into bit-counting.
+    Proven, fast, but accuracy drops on complex tasks.
+
+  \item \textbf{Tsetlin Machines (TMs)}~\cite{granmo2018tsetlin} abandon the neuron metaphor
+    entirely. Instead of weighted sums, they learn \emph{if--then} rules
+    (propositional clauses) using simple counting automata. They achieve
+    state-of-the-art results on MNIST~\cite{lecun1998mnist} while remaining fully
+    interpretable.
+
+  \item \textbf{Logic Gate Networks (LGNs)}~\cite{petersen2022difflogic} take a middle path: they
+    keep the layered network structure but replace neurons with actual
+    logic gates (AND, OR, XOR, etc.). Crucially, the \emph{type} of each
+    gate is learned during training through a differentiable relaxation.
+
+  \item \textbf{Kolmogorov-Arnold Networks (KANs) with LUT compilation}~\cite{liu2024kan}
+    flip the script: train with maximally expressive, learnable
+    activation functions (B-spline curves on every edge), then
+    \emph{compile} those curves into lookup tables for inference. The
+    result is a network that runs on table lookups---pure memory access,
+    no arithmetic.
+\end{enumerate}
+
+\subsection{How to Read This Article}
+
+This article is written for engineers, not mathematicians. Each paradigm
+is introduced in three stages:
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Intuition}---an analogy or diagram that conveys the core
+    idea without any equations.
+  \item \textbf{Mechanism}---how it actually works, with diagrams showing
+    data flow and simple numerical examples.
+  \item \textbf{Formalization}---the mathematical description, for those
+    who want to implement it or read the original papers.
+\end{enumerate}
+
+You can read at whatever depth suits you. The intuition sections alone
+give a solid understanding; the math sections are there when you need
+them.
+
+\subsection{Scope and Goal}
+
+Our concrete target is handwritten digit recognition on the MNIST
+dataset~\cite{lecun1998mnist}---a 28$\times$28 pixel grayscale image mapped to one of ten
+digits (0--9). This is deliberately simple: the goal is not to set
+accuracy records but to build a \emph{proof of concept} that
+demonstrates bitwise computation can work, implemented entirely in Rust,
+benchmarked against a standard floating-point baseline.

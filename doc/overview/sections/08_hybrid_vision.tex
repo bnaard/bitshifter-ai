@@ -1,0 +1,165 @@
+% ============================================================================
+\section{Toward a Hybrid Architecture}
+\label{sec:hybrid}
+% ============================================================================
+
+The comparison in the previous section suggests that no single paradigm
+is optimal across all criteria. This motivates a \concept{hybrid
+architecture} that combines the strengths of multiple paradigms. This
+section sketches a working hypothesis for such an architecture,
+targeting MNIST~\cite{lecun1998mnist} as a proof of concept.
+
+\subsection{Design Principles}
+
+Our hybrid design is guided by four principles:
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Interpretable feature extraction.} Use Tsetlin
+    Machine clauses for the first stage: they learn human-readable
+    rules about which pixel patterns indicate which digits.
+  \item \textbf{Flexible composition.} Use Logic Gate Networks for
+    the middle layers: they can learn complex combinations of the
+    clause outputs using arbitrary logic gates.
+  \item \textbf{Efficient deployment.} Use LUT compilation for
+    any continuous functions that remain: compile learned activations
+    into tables so that inference is pure memory access + bitwise
+    logic.
+  \item \textbf{All in Rust.} Implement both training and inference
+    in Rust for speed, safety, and cross-platform deployment.
+\end{enumerate}
+
+\subsection{Proposed Architecture}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  stage/.style={draw, rounded corners=5pt, minimum width=3.5cm,
+    minimum height=2cm, align=center, font=\small\sffamily,
+    line width=1pt},
+  arr/.style={-{Stealth[length=6pt]}, thick},
+  lbl/.style={font=\scriptsize\sffamily, bitgray}
+]
+  % Stage 1: Input
+  \node[stage, fill=lightbg] (input) at (0, 0)
+    {\textbf{Input}\\[3pt]28$\times$28 pixels\\$\downarrow$\\784 Boolean features\\+ 784 negations};
+
+  % Stage 2: Tsetlin clauses
+  \node[stage, fill=bitgreen!10, draw=bitgreen] (tm) at (5.5, 0)
+    {\textbf{Tsetlin Clauses}\\[3pt]$K \times M$ clauses\\learn feature patterns\\output: clause votes};
+
+  % Stage 3: LGN composition
+  \node[stage, fill=bitorange!10, draw=bitorange] (lgn) at (11, 0)
+    {\textbf{Logic Gate Network}\\[3pt]Learned gates combine\\clause outputs\\gate types: AND/OR/XOR/\ldots};
+
+  % Stage 4: Output
+  \node[stage, fill=bitpurple!10, draw=bitpurple] (out) at (5.5, -4)
+    {\textbf{LUT Classification}\\[3pt]Compiled scoring\\functions\\output: digit 0--9};
+
+  % Arrows
+  \draw[arr] (input) -- (tm);
+  \draw[arr] (tm) -- (lgn);
+  \draw[arr] (lgn) |- (out);
+
+  % Labels
+  \node[lbl, above=0.1cm] at (2.75, 0.8)
+    {booleanise};
+  \node[lbl, above=0.1cm] at (8.25, 0.8)
+    {clause $\to$ gate};
+  \node[lbl, right=0.1cm] at (11.8, -2)
+    {compile to LUTs};
+
+  % Training annotations
+  \draw[dashed, bitgreen, thick] (-1.8, -1.5) rectangle (7.5, 1.5);
+  \node[font=\scriptsize\sffamily, bitgreen, anchor=south west]
+    at (-1.8, 1.5) {Phase 1: Train with Tsetlin automata (no FP)};
+
+  \draw[dashed, bitorange, thick] (4, -1.8) rectangle (13, 1.8);
+  \node[font=\scriptsize\sffamily, bitorange, anchor=south east]
+    at (13, 1.8) {Phase 2: Train gate types (backprop)};
+
+  \draw[dashed, bitpurple, thick] (3.3, -5.5) rectangle (8, -2.5);
+  \node[font=\scriptsize\sffamily, bitpurple, anchor=south west]
+    at (3.3, -5.5) {Phase 3: Compile to LUTs};
+\end{tikzpicture}
+\caption{Proposed hybrid architecture. Stage 1 (Tsetlin) learns
+  interpretable feature patterns. Stage 2 (LGN) composes patterns with
+  learned logic gates. Stage 3 (LUT) compiles any remaining scoring
+  functions into lookup tables. Training is phased: Tsetlin automata
+  first (no floating-point needed), then backpropagation for gate
+  learning, then one-time LUT compilation.}
+\label{fig:hybrid-architecture}
+\end{figure}
+
+\subsection{Training Pipeline}
+
+The hybrid architecture suggests a three-phase training pipeline:
+
+\begin{description}[leftmargin=1em]
+  \item[Phase 1: Clause learning (Tsetlin).]
+    Train the Tsetlin Machine component on the booleanised MNIST
+    inputs. This produces a set of interpretable clauses---Boolean
+    expressions that capture local pixel patterns. The output of this
+    phase is a fixed set of clause activations per input image.
+    \emph{No floating-point arithmetic required.}
+
+  \item[Phase 2: Gate learning (LGN).]
+    Freeze the Tsetlin clauses. Train a Logic Gate Network on top
+    of the clause outputs. The LGN learns which gate types and
+    connectivity best combine the clause features into class scores.
+    This phase uses standard backpropagation with softmax relaxation
+    and temperature annealing.
+
+  \item[Phase 3: LUT compilation.]
+    After gate types are committed, compile any remaining continuous
+    functions (e.g., scoring aggregation, temperature scaling) into
+    lookup tables. The final inference model is entirely
+    integer/Boolean.
+\end{description}
+
+\begin{engineernote}
+This phased approach has a practical advantage for Rust
+implementation: Phase~1 needs only integer operations and random
+number generation. Phase~2 needs floating-point backpropagation
+(the most complex part). Phase~3 is a one-time offline step.
+You can implement and test each phase independently.
+\end{engineernote}
+
+\subsection{Expected Characteristics}
+
+\begin{table}[htbp]
+\centering
+\caption{Expected characteristics of the hybrid architecture on MNIST
+  (estimates based on component performance).}
+\label{tab:hybrid-expected}
+\begin{tabular}{@{}lr@{}}
+  \toprule
+  \textbf{Metric} & \textbf{Expected Range} \\
+  \midrule
+  Accuracy          & 97--99\% \\
+  Model size         & 50--500\,kB \\
+  Inference ops      & Boolean + LUT only \\
+  FP at inference?   & No \\
+  Interpretability   & Partial (Tsetlin clauses readable) \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Benchmarking Plan}
+
+To validate the hybrid approach, we will benchmark against a standard
+floating-point baseline:
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Baseline model:} A standard 2-layer MLP with ReLU
+    activations, trained with Adam optimiser in 32-bit floating
+    point. Expected accuracy: $\sim$98\%.
+  \item \textbf{Metrics:}
+    \begin{itemize}[leftmargin=1em]
+      \item Classification accuracy (test set)
+      \item Inference latency (microseconds per image)
+      \item Model size (bytes)
+      \item Inference energy estimate (based on operation counts)
+    \end{itemize}
+  \item \textbf{Environment:} Both models implemented in Rust, running
+    on the same CPU, with no GPU acceleration for either.
+\end{enumerate}

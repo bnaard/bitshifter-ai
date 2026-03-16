@@ -1,0 +1,301 @@
+% ============================================================================
+\section{Paradigm 2: Tsetlin Machines}
+\label{sec:tsetlin}
+% ============================================================================
+
+% --- Intuition ---
+\subsection{The Idea in Plain English}
+
+Forget neurons entirely. Imagine instead a committee of \emph{rule
+makers}. Each rule maker writes a simple if--then rule in plain
+English:
+
+\begin{quote}
+\emph{``If pixel~(14,14) is dark AND pixel~(10,10) is bright AND
+pixel~(20,5) is NOT bright, then it is probably a~3.''}
+\end{quote}
+
+Each rule maker starts with random rules and improves through
+trial and error: rules that help classify correctly get reinforced;
+rules that cause mistakes get weakened. No multiplication, no
+gradients, no floating-point numbers. Just counting and logic.
+
+This is the Tsetlin Machine~\cite{granmo2018tsetlin}.
+
+\begin{analogy}
+A traditional neural network is like an orchestra playing a
+continuous melody---smooth, precise, nuanced. A Tsetlin Machine
+is like a parliament voting on proposals. Each clause is a proposed
+rule; the machine counts votes for and against each classification.
+The learning process is the political negotiation: successful
+proposals gain support; failed ones lose it.
+\end{analogy}
+
+% --- Mechanism ---
+\subsection{How It Works}
+
+\subsubsection{Step 1: Booleanise the Input}
+
+Tsetlin Machines operate on Boolean (true/false) inputs. For MNIST,
+each pixel is thresholded (bright/dark), producing 784 Boolean
+features. For richer representation, each feature $x_k$ is
+accompanied by its negation $\bar{x}_k$, doubling the input to
+1568~literals.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  feat/.style={draw, minimum width=0.7cm, minimum height=0.6cm,
+    font=\scriptsize\ttfamily, inner sep=0pt},
+  lbl/.style={font=\small\sffamily}
+]
+  % Pixel value
+  \node[lbl] at (-2, 0) {Pixel value:};
+  \node[feat, fill=bitblue!30] at (0, 0) {183};
+
+  % Arrow
+  \draw[-{Stealth}, thick] (0.6, 0) -- (2, 0);
+  \node[font=\scriptsize\sffamily, above] at (1.3, 0) {$> 127$?};
+
+  % Boolean
+  \node[feat, fill=bitgreen!25] (pos) at (3, 0.5) {$x_k = 1$};
+  \node[feat, fill=bitorange!25] (neg) at (3, -0.5) {$\bar{x}_k = 0$};
+
+  \draw[-{Stealth}] (2.1, 0.1) -- (pos.west);
+  \draw[-{Stealth}] (2.1, -0.1) -- (neg.west);
+
+  % Label
+  \node[font=\scriptsize\sffamily, bitgray, right=0.3cm] at (neg.east)
+    {Both $x_k$ and $\bar{x}_k$ are available as literals};
+\end{tikzpicture}
+\caption{Input booleanisation for Tsetlin Machines. Each pixel becomes
+  two literals: the feature and its complement.}
+\label{fig:tm-booleanise}
+\end{figure}
+
+\subsubsection{Step 2: Clauses---The ``Rules''}
+
+A \concept{clause} is a conjunction (AND) of selected literals:
+
+\begin{equation}
+  C_j = x_3 \;\texttt{AND}\; \bar{x}_7 \;\texttt{AND}\; x_{42}
+    \;\texttt{AND}\; \bar{x}_{100} \;\texttt{AND}\; \ldots
+  \label{eq:clause}
+\end{equation}
+
+A clause outputs 1 only if \emph{all} its included literals are true.
+Crucially, most literals are \emph{excluded}---a clause typically
+selects only a small subset of the 1568 available literals.
+
+\subsubsection{Step 3: Voting}
+
+Clauses are assigned polarity: positive clauses vote \emph{for} a
+class, negative clauses vote \emph{against}. The class score is:
+
+\begin{equation}
+  \text{score}(y) = \sum_{j \in \text{pos}(y)} C_j
+    - \sum_{j \in \text{neg}(y)} C_j
+  \label{eq:tm-voting}
+\end{equation}
+
+The predicted class is the one with the highest score.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  clause/.style={draw, rounded corners=3pt, minimum width=3.2cm,
+    minimum height=0.7cm, font=\scriptsize\sffamily, align=center},
+  vote/.style={-{Stealth}, thick},
+  >=Stealth
+]
+  % Input
+  \node[draw, rounded corners, fill=lightbg, minimum width=2cm,
+    font=\small\sffamily] (input) at (0, 0) {Input (bits)};
+
+  % Positive clauses
+  \node[clause, fill=bitgreen!15] (c1) at (5, 1.5)
+    {$C_1^+$: $x_3 \wedge \bar{x}_7 \wedge x_{42}$};
+  \node[clause, fill=bitgreen!15] (c2) at (5, 0.5)
+    {$C_2^+$: $x_{10} \wedge x_{15} \wedge \bar{x}_{200}$};
+
+  % Negative clauses
+  \node[clause, fill=bitorange!15] (c3) at (5, -0.5)
+    {$C_3^-$: $x_1 \wedge x_{50} \wedge \bar{x}_{300}$};
+  \node[clause, fill=bitorange!15] (c4) at (5, -1.5)
+    {$C_4^-$: $\bar{x}_5 \wedge x_{77}$};
+
+  % Connections
+  \foreach \c in {c1,c2,c3,c4} {
+    \draw[->] (input.east) -- (\c.west);
+  }
+
+  % Sum
+  \node[draw, circle, minimum size=1cm, fill=bitblue!10,
+    font=\small\sffamily\bfseries] (sum) at (9.5, 0) {$\Sigma$};
+
+  \draw[vote, bitgreen] (c1.east) -- node[above, font=\scriptsize] {$+1$} (sum);
+  \draw[vote, bitgreen] (c2.east) -- node[above, font=\scriptsize] {$+1$} (sum);
+  \draw[vote, bitorange] (c3.east) -- node[below, font=\scriptsize] {$-1$} (sum);
+  \draw[vote, bitorange] (c4.east) -- node[below, font=\scriptsize] {$-1$} (sum);
+
+  % Output
+  \node[font=\small\sffamily, right=0.6cm] at (sum.east)
+    {Score for class ``3''};
+\end{tikzpicture}
+\caption{Tsetlin Machine clause voting. Each clause evaluates a
+  conjunction of literals (an AND of selected input bits). Positive
+  clauses vote for the class; negative clauses vote against. The net
+  score determines the prediction.}
+\label{fig:tm-voting}
+\end{figure}
+
+\subsubsection{Step 4: Learning with Tsetlin Automata}
+
+This is where Tsetlin Machines are fundamentally different from neural
+networks. There are no gradients. Instead, each literal in each clause
+is controlled by a \concept{Tsetlin automaton}---a simple finite-state
+machine with $2N$ states.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  state/.style={draw, circle, minimum size=0.6cm, font=\tiny\sffamily,
+    inner sep=0pt},
+  >=Stealth
+]
+  % States
+  \foreach \i in {1,...,4} {
+    \node[state, fill=bitorange!20] (ex\i) at (\i*1.2, 0)
+      {$\i$};
+  }
+  \foreach \i in {5,...,8} {
+    \node[state, fill=bitgreen!20] (in\i) at (\i*1.2, 0)
+      {$\i$};
+  }
+
+  % Arrows between states
+  \foreach \i [evaluate=\i as \j using int(\i+1)] in {1,...,7} {
+    \pgfmathtruncatemacro{\ii}{\i}
+    \pgfmathtruncatemacro{\jj}{\j}
+    \ifnum\ii<4
+      \draw[->] (ex\ii) -- (ex\jj);
+    \else
+      \ifnum\ii=4
+        \draw[->] (ex4) -- (in5);
+      \else
+        \draw[->] (in\ii) -- (in\jj);
+      \fi
+    \fi
+  }
+  \foreach \i [evaluate=\i as \j using int(\i-1)] in {2,...,8} {
+    \pgfmathtruncatemacro{\ii}{\i}
+    \pgfmathtruncatemacro{\jj}{\j}
+    \ifnum\ii>5
+      \draw[->, bend right=30, dashed] (in\ii) to (in\jj);
+    \else
+      \ifnum\ii=5
+        \draw[->, bend right=30, dashed] (in5) to (ex4);
+      \else
+        \draw[->, bend right=30, dashed] (ex\ii) to (ex\jj);
+      \fi
+    \fi
+  }
+
+  % Dividing line
+  \draw[thick, bitgray, dashed] (5.4, -1) -- (5.4, 1);
+  \node[font=\scriptsize\sffamily, bitorange] at (3, -1.3) {EXCLUDE literal};
+  \node[font=\scriptsize\sffamily, bitgreen] at (7.8, -1.3) {INCLUDE literal};
+
+  % Labels
+  \node[font=\scriptsize\sffamily, bitgray] at (5.4, 1.3) {threshold};
+\end{tikzpicture}
+\caption{A Tsetlin automaton with $2N = 8$ states. States 1--4 mean
+  ``exclude this literal from the clause''; states 5--8 mean ``include
+  it.'' Learning nudges the state left or right based on feedback.}
+\label{fig:tsetlin-automaton}
+\end{figure}
+
+The learning algorithm uses stochastic feedback:
+
+\begin{description}[leftmargin=1em]
+  \item[Type~I feedback] (reward correct clauses): Reinforce included
+    literals that matched the input; randomly exclude literals that
+    were not helpful. This \emph{specialises} clauses.
+  \item[Type~II feedback] (penalise incorrect clauses): Include
+    literals that would have falsified the clause (making it output~0
+    instead of erroneously voting). This \emph{corrects} clauses.
+\end{description}
+
+\begin{engineernote}
+The beauty of Tsetlin automata is that they are just
+\emph{counters}. Increment or decrement a state by 1 based on a
+coin flip and the classification result. No floating-point
+arithmetic at all. The entire training loop is integer addition,
+comparison, and random number generation.
+\end{engineernote}
+
+% --- Formalisation ---
+\subsection{Mathematical Summary}
+\label{sec:tm-math}
+
+Let $\bm{x} \in \{0,1\}^n$ be a binary input vector. Define the
+extended literal set $L = \{x_1, \bar{x}_1, x_2, \bar{x}_2, \ldots,
+x_n, \bar{x}_n\}$ with $|L| = 2n$.
+
+Each clause $C_j$ is defined by a subset $S_j \subseteq L$ and
+computes:
+\begin{equation}
+  C_j(\bm{x}) = \bigwedge_{\ell \in S_j} \ell
+  \label{eq:tm-clause-formal}
+\end{equation}
+
+For a $K$-class problem with $m$ clauses per class (half positive,
+half negative), the output for class $k$ is:
+\begin{equation}
+  f_k(\bm{x}) = \sum_{j=1}^{m/2} C_j^{+,k}(\bm{x})
+    - \sum_{j=1}^{m/2} C_j^{-,k}(\bm{x})
+  \label{eq:tm-class-score}
+\end{equation}
+
+The predicted class is $\hat{y} = \arg\max_k f_k(\bm{x})$.
+
+The threshold parameter $T$ controls clause voting saturation (scores
+are clipped to $[-T, T]$), and the specificity parameter $s$ controls
+how aggressively clauses specialise during Type~I feedback.
+
+\subsection{Performance on MNIST}
+\label{sec:tm-mnist}
+
+Tsetlin Machines achieve remarkable results on MNIST~\cite{lecun1998mnist}:
+
+\begin{table}[htbp]
+\centering
+\caption{Tsetlin Machine results on MNIST~\cite{granmo2018tsetlin}.}
+\label{tab:tm-mnist}
+\begin{tabular}{@{}lrr@{}}
+  \toprule
+  \textbf{Configuration}     & \textbf{Accuracy} & \textbf{Clauses} \\
+  \midrule
+  Basic TM (8,000 clauses)   & 98.2\%            & 8,000 \\
+  Convolutional TM            & 99.1\%            & 16,000 \\
+  State-of-art TM             & 99.35\%           & Millions \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Strengths and Limitations}
+
+\begin{description}[leftmargin=1em]
+  \item[Strengths:]
+    No floating-point arithmetic at all (training or inference),
+    fully interpretable (you can read the learned rules),
+    convergence proofs exist~\cite{granmo2018tsetlin},
+    naturally parallel (clauses are independent),
+    robust to noise.
+
+  \item[Limitations:]
+    Requires many clauses for complex tasks (millions for high
+    accuracy), limited to propositional logic (no hierarchical
+    feature extraction by default), hyperparameter sensitivity
+    ($T$ and $s$), less mature ecosystem than neural networks.
+\end{description}
