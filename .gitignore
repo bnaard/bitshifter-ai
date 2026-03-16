@@ -50,6 +50,8 @@ out/
 
 # PDFs and other generated documents
 *.pdf
+# Exception: keep reference papers
+!research/papers/*.pdf
 *.ps
 *.dvi
 
