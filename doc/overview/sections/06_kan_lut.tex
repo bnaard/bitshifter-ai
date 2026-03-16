@@ -283,13 +283,136 @@ most hardware.
 
 The \concept{Ultra-Low-Energy Edge Neural Network}
 (ULEEN)~\cite{uleen2023} takes the LUT idea to its logical extreme:
-the entire network is just tables. No splines, no arithmetic, not even
-during training. The input features are grouped, each group indexes
-into a table, and the outputs are summed.
+the entire network---including the ``neurons''---is just tables.
+No splines, no arithmetic, no multiply-accumulate. Let us walk through
+how this works.
+
+\subsubsection{The Core Idea: Neurons as Table Lookups}
+
+In a traditional neural network, a neuron computes
+$y = \sigma(\sum w_i x_i + b)$: multiply inputs by weights, sum,
+and apply an activation function. A ULEEN replaces this entire
+computation with a single table lookup.
+
+Consider a neuron that receives 4 binary inputs. Those 4~bits can
+take $2^4 = 16$ possible combinations. We can precompute the
+``correct'' output for every combination and store the results in a
+table with 16~entries. At inference, we concatenate the 4~input bits
+into a 4-bit address, look up the answer, and we are done---one
+memory read instead of 4~multiplications, 3~additions, and an
+activation function.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  bit/.style={draw, minimum width=0.6cm, minimum height=0.6cm,
+    font=\small\ttfamily, inner sep=0pt},
+  tbl/.style={draw, rounded corners=3pt, minimum width=2.2cm,
+    minimum height=2.5cm, font=\small\sffamily, align=center,
+    fill=bitpurple!8, draw=bitpurple},
+  arr/.style={-{Stealth[length=5pt]}, thick},
+  >=Stealth
+]
+  % Input bits
+  \node[font=\small\sffamily] at (-0.5, 2.5) {Inputs:};
+  \node[bit, fill=bitblue!15] (b1) at (1.5, 2.5) {1};
+  \node[bit, fill=bitblue!15] (b2) at (2.3, 2.5) {0};
+  \node[bit, fill=bitblue!15] (b3) at (3.1, 2.5) {1};
+  \node[bit, fill=bitblue!15] (b4) at (3.9, 2.5) {1};
+
+  % Concatenate arrow
+  \draw[arr] (2.7, 2.0) -- (2.7, 1.2);
+  \node[font=\scriptsize\sffamily, right] at (3.0, 1.6) {concatenate $\to$ address};
+
+  % Address
+  \node[font=\small\ttfamily, fill=bitorange!10, draw=bitorange,
+    rounded corners=2pt, inner sep=4pt] (addr) at (2.7, 0.6) {1011 = 11};
+
+  % LUT
+  \node[tbl] (lut) at (7.5, 0.6) {Lookup\\Table\\(16 entries)};
+  \draw[arr] (addr) -- (lut) node[midway, above, font=\scriptsize\sffamily]
+    {index 11};
+
+  % Output
+  \node[font=\small\ttfamily, fill=bitgreen!15, draw=bitgreen,
+    rounded corners=2pt, inner sep=4pt] (out) at (11.5, 0.6) {+3};
+  \draw[arr] (lut) -- (out) node[midway, above, font=\scriptsize\sffamily]
+    {read};
+
+  % Table detail (small)
+  \begin{scope}[xshift=6.1cm, yshift=-2.5cm, scale=0.8]
+    \node[font=\scriptsize\sffamily\bfseries] at (1.75, 3.7) {Address};
+    \node[font=\scriptsize\sffamily\bfseries] at (3.5, 3.7) {Value};
+    \draw[bitgray] (0.5, 3.4) -- (4.5, 3.4);
+    \foreach \i/\v in {0/$-$1, 1/+2, 2/0, 3/+1} {
+      \node[font=\tiny\ttfamily] at (1.75, {3.0-\i*0.5}) {\i};
+      \node[font=\tiny\ttfamily] at (3.5, {3.0-\i*0.5}) {\v};
+    }
+    \node[font=\tiny\sffamily, bitgray] at (2.5, 0.6) {$\vdots$};
+    \node[font=\tiny\ttfamily, fill=bitgreen!20] at (1.75, 0.0) {11};
+    \node[font=\tiny\ttfamily, fill=bitgreen!20] at (3.5, 0.0) {+3};
+    \node[font=\tiny\sffamily, bitgray] at (2.5, -0.5) {$\vdots$};
+    \node[font=\tiny\ttfamily] at (1.75, -1.0) {15};
+    \node[font=\tiny\ttfamily] at (3.5, -1.0) {$-$2};
+  \end{scope}
+\end{tikzpicture}
+\caption{A ULEEN ``neuron'': 4 binary inputs are concatenated into a
+  4-bit address, which indexes into a 16-entry lookup table. The entire
+  neuron computation is a single memory read. No multiplication,
+  no addition, no activation function.}
+\label{fig:uleen-neuron}
+\end{figure}
+
+\subsubsection{Scaling Up: Groups and Sums}
+
+A single 4-input table can only capture patterns among 4~input bits.
+To handle the full 784-pixel MNIST input, ULEEN groups the inputs:
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Booleanise} the inputs (e.g., threshold each pixel
+    to 0 or~1), producing 784 binary features.
+  \item \textbf{Group} the features into small groups of $n$ bits
+    (e.g., $n = 6$, giving $784 / 6 \approx 131$ groups).
+  \item Each group has its own table with $2^n$ entries (for $n = 6$:
+    64 entries per table).
+  \item \textbf{Look up} each group's table entry.
+  \item \textbf{Sum} the table outputs across all groups to produce
+    a final score for each class.
+\end{enumerate}
+
+\begin{analogy}
+Imagine you are judging handwriting by committee. Each committee
+member looks at only a tiny patch of the image (their group of
+pixels), consults a personal cheat sheet (their table) to score
+what they see, and announces a number. You add up all the numbers.
+The digit with the highest total score wins. No member needs to
+see the full image; no member does any computation beyond looking
+up their cheat sheet.
+\end{analogy}
+
+\begin{engineernote}
+The ``sum'' at the end is the only arithmetic ULEEN performs---and it
+is integer addition, not floating-point. The entire model is: hash
+the input group $\to$ read a table $\to$ add. This is why ULEEN
+achieves 0.21\,$\mu$s inference latency and fits in 16.9\,kB: the
+model is small enough to live entirely in L1 cache, and every
+operation is a memory read or integer add.
+\end{engineernote}
+
+\subsubsection{How the Tables Are Trained}
+
+The table entries are not hand-crafted---they are \emph{learned}
+from data using a variant of the Wisard/weightless neural network
+training algorithm. Each training example increments or decrements
+table entries based on whether the current prediction is correct.
+This is simpler than backpropagation: no gradients, no chain rule,
+no floating-point arithmetic even during training.
 
 \begin{table}[htbp]
 \centering
-\caption{ULEEN results on MNIST.}
+\caption{ULEEN results on MNIST~\cite{uleen2023}. The model trades
+  some accuracy for extreme efficiency: 14~million inferences per
+  second in a 17\,kB model.}
 \label{tab:uleen}
 \begin{tabular}{@{}lr@{}}
   \toprule

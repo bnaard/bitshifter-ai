@@ -124,6 +124,13 @@ trade-offs.
 
 \subsection{The Computation--Memory Spectrum}
 
+A unifying way to understand the four paradigms is as points on a
+\emph{computation--memory trade-off} (\cref{fig:compute-memory}).
+Moving from BNNs to KAN/LUTs, each connection stores more information
+in memory but requires less arithmetic at inference time. This is the
+classic computer science principle of trading space for time, applied
+to neural network design.
+
 \begin{figure}[htbp]
 \centering
 \begin{tikzpicture}[>=Stealth]
