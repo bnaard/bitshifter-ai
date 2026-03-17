@@ -113,6 +113,77 @@ are~1. Most modern CPUs have a dedicated popcount instruction.
 \label{fig:popcount}
 \end{figure}
 
+Two more operations round out the bitwise toolkit:
+\concept{bit shift} and \concept{bit rotation}. A \emph{left shift}
+by $k$ positions moves every bit $k$ places toward the most
+significant end, filling the vacated positions with zeros. A
+\emph{right shift} does the reverse. Mathematically, shifting left by
+$k$ is equivalent to multiplying by $2^k$, and shifting right by $k$
+is equivalent to (integer) dividing by $2^k$---but the CPU does it in
+a single cycle, without invoking the multiplier or divider circuit.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  bit/.style={draw, minimum width=0.6cm, minimum height=0.6cm,
+    font=\small\ttfamily, inner sep=0pt},
+  >=Stealth
+]
+  % Original
+  \node[font=\sffamily\bfseries, left] at (-0.5, 0) {Original:};
+  \foreach \b [count=\i from 0] in {0,0,1,0,1,1,0,1} {
+    \ifnum\b=1
+      \def\fillcol{bitblue!20}
+    \else
+      \def\fillcol{white}
+    \fi
+    \node[bit, fill=\fillcol] at (\i*0.7+2, 0) {\b};
+  }
+  \node[font=\scriptsize\sffamily, right] at (7.7, 0) {$= 45$};
+
+  % Left shift by 2
+  \node[font=\sffamily\bfseries, left] at (-0.5, -1.2) {$\ll 2$:};
+  \foreach \b [count=\i from 0] in {1,0,1,1,0,1,0,0} {
+    \ifnum\b=1
+      \def\fillcol{bitorange!25}
+    \else
+      \def\fillcol{white}
+    \fi
+    \node[bit, fill=\fillcol] at (\i*0.7+2, -1.2) {\b};
+  }
+  \node[font=\scriptsize\sffamily, right] at (7.7, -1.2)
+    {$= 180 = 45 \times 4$};
+
+  % Right shift by 2
+  \node[font=\sffamily\bfseries, left] at (-0.5, -2.4) {$\gg 2$:};
+  \foreach \b [count=\i from 0] in {0,0,0,0,1,0,1,1} {
+    \ifnum\b=1
+      \def\fillcol{bitgreen!25}
+    \else
+      \def\fillcol{white}
+    \fi
+    \node[bit, fill=\fillcol] at (\i*0.7+2, -2.4) {\b};
+  }
+  \node[font=\scriptsize\sffamily, right] at (7.7, -2.4)
+    {$= 11 = \lfloor 45 / 4 \rfloor$};
+\end{tikzpicture}
+\caption{Bit shifting. Left shift ($\ll$) multiplies by a power of~2;
+  right shift ($\gg$) divides by a power of~2. Both execute in one
+  clock cycle. Bit \emph{rotation} is similar but wraps bits around
+  instead of discarding them.}
+\label{fig:bitshift}
+\end{figure}
+
+\begin{keyinsight}
+Bit shifts turn multiplication and division by powers of~2 into
+single-cycle operations. This is why they appear throughout the
+integer-only methods in later sections: Shiftmax approximates the
+exponential function using shifts (\cref{sec:softmax-problem}),
+and integer normalisation replaces square roots and divisions with
+iterative shift-and-add sequences
+(\cref{sec:layernorm-problem}).
+\end{keyinsight}
+
 \subsection{The Cost of Arithmetic}
 \label{sec:cost-arithmetic}
 
