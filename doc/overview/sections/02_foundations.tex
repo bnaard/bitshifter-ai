@@ -174,15 +174,18 @@ a single cycle, without invoking the multiplier or divider circuit.
 \label{fig:bitshift}
 \end{figure}
 
-\begin{keyinsight}
+\begin{engineernote}
 Bit shifts turn multiplication and division by powers of~2 into
 single-cycle operations. This is why they appear throughout the
 integer-only methods in later sections: Shiftmax approximates the
 exponential function using shifts (\cref{sec:softmax-problem}),
 and integer normalisation replaces square roots and divisions with
 iterative shift-and-add sequences
-(\cref{sec:layernorm-problem}).
-\end{keyinsight}
+(\cref{sec:layernorm-problem}). Bit \emph{rotation} (wrapping
+bits around instead of discarding them) is a standard CPU operation
+used in cryptography and hashing but does not currently play a role
+in any of the neural network paradigms discussed in this article.
+\end{engineernote}
 
 \subsection{The Cost of Arithmetic}
 \label{sec:cost-arithmetic}
@@ -202,6 +205,7 @@ chip~\cite{horowitz2014energy}.
   \textbf{Operation}      & \textbf{Energy (pJ)} & \textbf{Relative Cost} \\
   \midrule
   Bitwise AND/OR/XOR      & 0.1                  & 1$\times$ \\
+  Bit shift                & 0.1                  & 1$\times$ \\
   Integer addition (32-bit)& 0.9                  & 9$\times$ \\
   Integer multiply (32-bit)& 3.1                  & 31$\times$ \\
   FP addition (32-bit)     & 0.9                  & 9$\times$ \\
@@ -219,6 +223,134 @@ energy than a logic gate. This is the ``memory wall,'' and it means
 that any approach which keeps data close to the logic (small models,
 local lookups) wins enormously on energy, even if it does more
 operations.
+\end{keyinsight}
+
+% ----------------------------------------------------------------------------
+\subsection{The Precision Spectrum: From 1-Bit to 8-Bit}
+\label{sec:precision-spectrum}
+% ----------------------------------------------------------------------------
+
+The paradigms in this article differ not only in \emph{which}
+operations they use, but in how many bits represent each value.
+This distinction is important because it determines what bitwise
+operations can meaningfully compute.
+
+\subsubsection{Why Most Approaches Booleanise to 1~Bit}
+
+If every input and every weight is a single bit, then AND, OR, XOR,
+and NOT are the \emph{natural} operations---they map exactly onto
+the logic of combining two Boolean propositions. XNOR on two 1-bit
+values tells you whether they agree. Popcount on a vector of XNOR
+results tells you how many positions agree---a Hamming similarity.
+This is maximally hardware-efficient: a 64-bit CPU processes 64
+independent 1-bit operations in a single instruction.
+
+The price is \concept{precision loss}. For MNIST, collapsing each
+pixel to 1~bit (ink or background) loses surprisingly little
+information---the images are nearly binary already. But for richer
+inputs (colour images, audio spectrograms, word embeddings),
+reducing to 1~bit per feature is destructive.
+
+\subsubsection{The Positional Encoding Problem}
+
+Why not simply apply XNOR to 8-bit values? You can---but the
+result is not what you might expect. An 8-bit integer stores its
+value in \emph{positional binary encoding}: bit~7 is worth~128,
+bit~0 is worth~1. Bitwise operations treat all bit positions
+identically---they do not know that bit~7 matters 128$\times$ more
+than bit~0.
+
+\begin{analogy}
+Applying XOR to two 8-bit integers is like comparing two
+five-digit numbers by checking how many \emph{digits} match,
+regardless of position. The numbers 50{,}001 and 50{,}002 differ
+in one digit (the units), but so do 50{,}001 and 10{,}001 (the
+ten-thousands). Position-blind comparison treats these as equally
+different, even though the first pair is numerically close and the
+second pair is far apart.
+\end{analogy}
+
+To make bitwise operations numerically meaningful on multi-bit
+values, you need one of three approaches:
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Carry propagation}---let the result of one bit
+    position influence the next. This is exactly what integer
+    addition does: it is implemented as a chain of XOR gates (for
+    the sum bits) and AND gates (for the carries). In other words,
+    integer addition \emph{is} a structured sequence of bitwise
+    operations with inter-bit dependencies.
+
+  \item \textbf{Unary (thermometer) encoding}---represent the
+    value~5 not as \texttt{0101} but as \texttt{11111000} (five~1s
+    followed by zeros). Now bitwise AND gives the minimum of two
+    values, OR gives the maximum, and Hamming distance correlates
+    with numerical distance. The cost: a $k$-bit value becomes a
+    $(2^k - 1)$-bit thermometer, a large expansion.
+
+  \item \textbf{Accept the approximation}---use Hamming distance on
+    raw binary as a rough similarity measure. This works
+    surprisingly well when combined with large vectors and
+    averaging (high-dimensional statistics smooth out the
+    positional noise).
+\end{enumerate}
+
+\subsubsection{The Precision--Operation Map}
+
+\Cref{tab:precision-map} shows how different approaches in this
+article combine data precision with operation types. The field has
+split into two camps: \emph{pure logic} (1-bit data, logic gates)
+and \emph{integer quantisation} (multi-bit data, integer arithmetic).
+
+\begin{table}[htbp]
+\centering
+\caption{The precision spectrum. Approaches differ in how many bits
+  represent data and weights, which determines what operations are
+  efficient.}
+\label{tab:precision-map}
+\small
+\begin{tabular}{@{}p{2.6cm}ccp{3.7cm}l@{}}
+  \toprule
+  \textbf{Approach} & \textbf{Data} & \textbf{Weights}
+    & \textbf{Core operations} & \textbf{Used by} \\
+  \midrule
+  Full binary
+    & 1 bit & 1 bit
+    & AND, OR, XOR, NOT
+    & BNN, TM, LGN \\[3pt]
+  Thermometer
+    & $k$ bits (unary) & 1 bit
+    & Logic on expanded features
+    & Advanced TM \\[3pt]
+  Ternary weights
+    & 8 bit & 1.58 bit
+    & Integer add/subtract
+    & BitNet b1.58 \\[3pt]
+  Low-bit integer
+    & 4--8 bit & 4--8 bit
+    & Integer + bit shifts
+    & I-BERT, I-ViT \\[3pt]
+  LUT deployment
+    & any & (compiled)
+    & Memory read
+    & KAN/LUT, ULEEN \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\begin{keyinsight}
+Notice the gap in \cref{tab:precision-map}: \textbf{no approach
+combines multi-bit data with pure bitwise operations (no integer
+addition).} The ``pure logic'' camp booleanises everything to 1~bit;
+the ``integer'' camp keeps multi-bit data but relies on integer
+addition with carry propagation. The middle ground---multi-bit data
+processed only with shifts, masks, and position-independent logic---is
+largely unexplored. Whether novel encodings (thermometer, Gray code,
+or something entirely new) could make this viable is an open research
+question. Classical integer addition costs $9\times$ the energy of a
+bitwise operation (\cref{tab:op-cost}); if it could be avoided while
+retaining multi-bit precision, the efficiency gain would be
+significant.
 \end{keyinsight}
 
 % ----------------------------------------------------------------------------
