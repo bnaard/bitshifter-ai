@@ -11,19 +11,40 @@ floating-point weights and summed up---are the heartbeat of modern AI.
 The industry calls this operation \concept{multiply-accumulate} (MAC),
 and virtually every neural network alive today is built on it.
 
-This dependence has consequences:
+This dependence has consequences---and the industry knows it.
+\emph{Quantisation} has become the standard countermeasure: reducing
+weights from 32-bit floating-point to 8-bit or even 4-bit integers
+cuts memory and energy dramatically. A 70-billion-parameter model
+that once required 140\,GB in 16-bit format now fits in roughly
+35\,GB at 4~bits (via methods such as GPTQ~\cite{frantar2022gptq} or
+AWQ~\cite{lin2023awq}), bringing it within reach of consumer
+hardware. Experimental 2-bit quantisation pushes this below 18\,GB.
+
+Yet even aggressively quantised models still rely on integer
+multiplication and addition---operations that, while far cheaper than
+floating-point, remain significantly more expensive than the simplest
+thing a processor can do:
 
 \begin{itemize}[leftmargin=2em]
-  \item \textbf{Energy:} A single floating-point multiplication consumes
-    roughly 20$\times$ more energy than a bitwise logic operation (AND, OR,
-    XOR) on the same chip~\cite{horowitz2014energy}.
-  \item \textbf{Hardware monopoly:} Training and running large models
-    requires GPUs, a market dominated by a single manufacturer. This
-    creates bottlenecks in supply, cost, and access.
-  \item \textbf{Deployment barriers:} A 70-billion-parameter model
-    requires 140\,GB of memory in standard 16-bit floating-point
-    representation. That is an entire server rack, not a phone or
-    a sensor on a factory floor.
+  \item \textbf{Energy:} At 45\,nm, a 32-bit floating-point
+    multiplication costs 3.7\,pJ; an 8-bit integer multiplication costs
+    0.2\,pJ---an $18\times$ reduction. But a single bitwise logic
+    operation (AND, OR, XOR) costs on the order of 0.1\,pJ, cheaper
+    still and $37\times$ below floating-point~\cite{horowitz2014energy}.
+    These ratios reflect the algorithmic complexity of each operation
+    (a multiplier requires $O(n^2)$ gates, an adder $O(n)$, a bitwise
+    operation $O(1)$ per bit) and therefore hold across process
+    nodes~\cite{stillmaker2017scaling}.
+  \item \textbf{Hardware monopoly:} Training large models still requires
+    GPUs, a market dominated by a single manufacturer. Quantised
+    inference can run on CPUs, but the underlying matrix multiplications
+    over integer values still benefit heavily from specialised
+    accelerators.
+  \item \textbf{Deployment barriers:} Even with 4-bit quantisation, a
+    70-billion-parameter model requires roughly 35\,GB---feasible on a
+    high-end laptop but not on a microcontroller, a sensor, or a phone
+    without dedicated AI silicon. A fully binary network storing one bit
+    per weight would need only $\sim$8\,GB for the same model.
 \end{itemize}
 
 \begin{keyinsight}
@@ -35,8 +56,9 @@ every CPU already has.
 
 \subsection{The Four Paradigms}
 
-Over the past decade, four distinct research directions have emerged,
-each attacking the MAC bottleneck from a different angle.
+Over the past decade, four distinct research directions have emerged
+that aim to replace MAC operations with \emph{bitwise} neural
+computation---each attacking the problem from a different angle.
 \Cref{fig:paradigm-map} shows how they relate.
 
 \begin{figure}[htbp]
@@ -70,15 +92,11 @@ each attacking the MAC bottleneck from a different angle.
   \draw[arrow, bitorange] (lgn.north east)  -- (center);
   \draw[arrow, bitpurple] (kan.north west)  -- (center);
 
-  % Labels on arrows -- offset to avoid overlap
-  \node[label, above, rotate=-30, yshift=1pt]
-    at ($(bnn.south east)!0.5!(center)$) {binary weights};
-  \node[label, above, rotate=30, yshift=1pt]
-    at ($(tm.south west)!0.5!(center)$) {clause logic};
-  \node[label, below, rotate=30, yshift=-1pt]
-    at ($(lgn.north east)!0.5!(center)$) {gate learning};
-  \node[label, below, rotate=-30, yshift=-1pt]
-    at ($(kan.north west)!0.5!(center)$) {LUT inference};
+  % Labels on arrows -- horizontal, anchored near the boxes
+  \node[label, anchor=east] at ($(bnn.south east)+(0,-0.3)$) {binary weights};
+  \node[label, anchor=west] at ($(tm.south west)+(0,-0.3)$) {clause logic};
+  \node[label, anchor=east] at ($(lgn.north east)+(0,0.3)$) {gate learning};
+  \node[label, anchor=west] at ($(kan.north west)+(0,0.3)$) {LUT inference};
 \end{tikzpicture}
 \caption{The four paradigms of bitwise neural computation and their
   convergence toward a hybrid architecture. Each contributes a different
@@ -90,26 +108,30 @@ each attacking the MAC bottleneck from a different angle.
 \begin{enumerate}[leftmargin=2em]
   \item \textbf{Binary Neural Networks (BNNs)}~\cite{courbariaux2016bnn} constrain weights and
     sometimes activations to just two values ($+1$ and $-1$). This turns
-    multiplication into an XNOR gate and addition into bit-counting.
+    multiplication into an XNOR gate and addition into bit-counting
+    (\cref{sec:bnn}).
     Proven, fast, but accuracy drops on complex tasks.
 
   \item \textbf{Tsetlin Machines (TMs)}~\cite{granmo2018tsetlin} abandon the neuron metaphor
     entirely. Instead of weighted sums, they learn \emph{if--then} rules
-    (propositional clauses) using simple counting automata. They achieve
-    state-of-the-art results on MNIST~\cite{lecun1998mnist} while remaining fully
+    (propositional clauses) using simple counting automata
+    (\cref{sec:tsetlin}). They achieve
+    state-of-the-art results on the MNIST handwritten-digit
+    dataset~\cite{lecun1998mnist} while remaining fully
     interpretable.
 
   \item \textbf{Logic Gate Networks (LGNs)}~\cite{petersen2022difflogic} take a middle path: they
     keep the layered network structure but replace neurons with actual
     logic gates (AND, OR, XOR, etc.). Crucially, the \emph{type} of each
-    gate is learned during training through a differentiable relaxation.
+    gate is learned during training through a differentiable relaxation
+    (\cref{sec:lgn}).
 
   \item \textbf{Kolmogorov-Arnold Networks (KANs) with LUT compilation}~\cite{liu2024kan}
     flip the script: train with maximally expressive, learnable
     activation functions (B-spline curves on every edge), then
-    \emph{compile} those curves into lookup tables for inference. The
-    result is a network that runs on table lookups---pure memory access,
-    no arithmetic.
+    \emph{compile} those curves into lookup tables (LUTs) for inference.
+    The result is a network that runs on table lookups---pure memory
+    access, no arithmetic (\cref{sec:kan}).
 \end{enumerate}
 
 \subsection{How to Read This Article}
@@ -132,9 +154,17 @@ them.
 
 \subsection{Scope and Goal}
 
-Our concrete target is handwritten digit recognition on the MNIST
-dataset~\cite{lecun1998mnist}---a 28$\times$28 pixel grayscale image mapped to one of ten
-digits (0--9). This is deliberately simple: the goal is not to set
-accuracy records but to build a \emph{proof of concept} that
-demonstrates bitwise computation can work, implemented entirely in Rust,
-benchmarked against a standard floating-point baseline.
+Our concrete starting point is handwritten digit recognition on the
+MNIST dataset~\cite{lecun1998mnist}---a 28$\times$28 pixel grayscale
+image mapped to one of ten digits (0--9). MNIST is deliberately simple:
+the goal is not to set accuracy records but to build a \emph{proof of
+concept} that demonstrates bitwise computation can work, implemented
+entirely in Rust, benchmarked against a standard floating-point baseline.
+
+Beyond the proof of concept, this article also surveys how each paradigm
+can scale. \Cref{sec:transformers-llms} provides a self-contained
+introduction to transformers and large language models;
+\cref{sec:scaling-llms} evaluates whether every transformer component
+can be made integer-only or bitwise; and \cref{sec:hybrid}
+sketches a hybrid architecture that combines the best ideas from all
+four paradigms.

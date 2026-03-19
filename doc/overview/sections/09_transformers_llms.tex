@@ -479,7 +479,8 @@ It requires:
 \end{itemize}
 Every other step (projection, scoring, aggregation) is matrix
 multiplication, which \emph{can} be approximated with integer or
-ternary arithmetic (as BitNet demonstrates). The softmax is where
+ternary arithmetic (as BitNet demonstrates;
+see \cref{sec:bitnet-reality}). The softmax is where
 floating-point computation concentrates.
 \end{keyinsight}
 
@@ -594,7 +595,8 @@ However, approximations exist: \concept{RMSNorm} (used in Llama and
 many modern LLMs) drops the mean subtraction and simplifies to
 $\bm{x} / \text{RMS}(\bm{x}) \cdot \bm{\gamma}$, which is slightly
 simpler. Integer approximations of RMSNorm have been demonstrated
-in quantisation research, though with some accuracy trade-off.
+in quantisation research, though with some accuracy trade-off
+(\cref{sec:layernorm-problem}).
 \end{engineernote}
 
 % ----------------------------------------------------------------------------

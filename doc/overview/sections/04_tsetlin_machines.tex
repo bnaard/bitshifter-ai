@@ -299,4 +299,16 @@ Tsetlin Machines achieve remarkable results on MNIST~\cite{lecun1998mnist}:
     accuracy), limited to propositional logic (no hierarchical
     feature extraction by default), hyperparameter sensitivity
     ($T$ and $s$), less mature ecosystem than neural networks.
+
+  \item[Open question:]
+    In the standard formulation, the number of clauses and the literal
+    pool are both fixed before training begins. The automata learn
+    \emph{which} literals to include in each clause, but cannot create
+    new clauses at runtime. Clause weighting variants can suppress
+    unhelpful clauses (effectively ``turning them off''), and drop-clause
+    regularisation randomly disables clauses during training (analogous
+    to dropout in neural networks). However, dynamically \emph{growing}
+    the clause set during training---adding clauses when the model
+    detects that its current capacity is insufficient---remains an
+    unexplored research direction.
 \end{description}

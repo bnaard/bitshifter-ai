@@ -1,0 +1,19 @@
+[dev-box]
+version = "0.3.4"
+image = "rust-latex"
+process = "research"
+
+[container]
+name = "bitshifter-ai"
+hostname = "bitshifter"
+ports = []
+extra_packages = []
+environment = {}
+
+[context]
+owner = "~/.config/dev-box/OWNER.md"
+schema_version = "1.0.0"
+
+[audio]
+enabled = true
+pulse_server = "tcp:host.docker.internal:4714"

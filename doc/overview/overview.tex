@@ -130,61 +130,75 @@ This \emph{multiply-accumulate} (MAC) operation demands floating-point
 hardware, consumes significant energy, and has led to an industry
 dominated by GPU manufacturers. But what if neural networks could
 be built from the simplest operations a processor can perform---AND,
-OR, XOR, and table lookups?
+OR, XOR, bit shifts, and table lookups?
 
 This article surveys four paradigms that pursue this goal:
 \textbf{Binary Neural Networks}, which constrain weights to $\{-1, +1\}$
 and replace multiplication with XNOR gates;
 \textbf{Tsetlin Machines}, which learn propositional logic clauses
 through simple automata;
-\textbf{Logic Gate Networks}, which learn the wiring \emph{and} type of
-logic gates end-to-end; and
+\textbf{Logic Gate Networks}, which learn the type of logic gates
+end-to-end; and
 \textbf{Kolmogorov-Arnold Networks with Lookup Table compilation},
 which train complex learnable functions and then compile them
 into memory tables for near-zero-cost inference.
 
 Each paradigm is introduced from first principles, with diagrams
-and analogies before equations. The article concludes with a
-discussion of how these approaches might be combined into a hybrid
-architecture for handwritten digit recognition on the MNIST dataset,
-implemented entirely in Rust.
+and analogies before equations. The article examines a fundamental
+tension across these approaches: the trade-off between data
+precision and operation type. Pure bitwise methods booleanise inputs
+to single bits for maximum hardware efficiency; integer
+quantisation methods keep multi-bit data but require costlier
+arithmetic. The gap between these two camps---multi-bit data
+processed with purely bitwise operations---remains an open research
+question.
+
+Beyond classification, the article provides a self-contained
+introduction to transformer architectures and large language models
+(LLMs), then evaluates whether bitwise paradigms can scale to
+LLM-sized models. The analysis shows that every transformer
+component---including the attention softmax and layer
+normalisation---now has a demonstrated integer-only or bit-shift
+implementation. A combined architecture is proposed: ternary
+weights (BitNet), bit-shift attention, integer normalisation, and
+LUT-compiled activations. The remaining challenge is integration
+at scale, not the feasibility of individual components.
+
+The article concludes with a hybrid architecture for MNIST digit
+recognition as a proof-of-concept, targeting implementation
+entirely in Rust with no GPU dependency.
 \end{abstract}
 
-\vfill
+\clearpage
 
-\subsection*{Disclaimer: AI-Assisted Document}
-
+\begin{small}
+\noindent\textbf{Disclaimer: AI-Assisted Document.}\quad
 This document was generated with substantial assistance from a large
 language model (Claude, Anthropic). The human author directed the
 research questions, architectural vision, and editorial decisions;
 the AI assisted with literature research, technical writing, diagram
-creation, and LaTeX typesetting.
+creation, and \LaTeX{} typesetting.
 
-\paragraph{Sources of information.}
+\smallskip\noindent\textit{Sources of information.}\quad
 The content draws on three sources: (1)~the AI model's training data,
-which includes a broad corpus of academic publications up to its
-knowledge cutoff; (2)~web searches conducted by AI agents during the
-writing process, which retrieved paper abstracts, blog posts, and
-secondary summaries rather than full-text PDFs; and (3)~the author's
-domain knowledge and editorial judgement.
+which includes academic publications up to its knowledge cutoff;
+(2)~web searches conducted by AI agents during the writing process,
+which retrieved paper abstracts and secondary summaries rather than
+full-text PDFs; and (3)~the author's domain knowledge.
 
-\paragraph{Citation reliability.}
-All bibliography entries (titles, authors, years, arXiv identifiers)
-were verified against their arXiv listing pages or publisher metadata.
-However, the \emph{claims made about} those papers---accuracy figures,
-speedup factors, architectural details---are based on training-data
-knowledge and web-search summaries, not on systematic reading of the
-full-text sources. Specific numerical claims (performance tables,
-parameter counts, energy estimates) should be verified against the
-original publications before being cited in further work.
+\smallskip\noindent\textit{Citation reliability.}\quad
+All bibliography entries were verified against arXiv listings or
+publisher metadata. Specific claims \emph{about} papers (accuracy
+figures, speedup factors, architectural details) were subsequently
+audited against the downloaded full-text PDFs where available, and
+corrected where discrepancies were found. Claims about papers
+without freely accessible PDFs (paywalled proceedings, books) carry
+higher uncertainty. The reader is encouraged to consult the original
+sources, available in the \texttt{research/papers/} directory of the
+companion repository.
+\end{small}
 
-\paragraph{Known limitations.}
-Papers without freely accessible PDFs (conference proceedings behind
-paywalls, older publications, books) could only be verified at the
-abstract or metadata level. Claims about these works carry higher
-uncertainty. The reader is encouraged to consult the original sources,
-many of which are available in the companion \texttt{research/papers/}
-directory of this repository.
+\clearpage
 
 \tableofcontents
 \clearpage
@@ -201,6 +215,9 @@ directory of this repository.
 \input{sections/09_transformers_llms}
 \input{sections/10_scaling_bitwise_llms}
 \input{sections/11_conclusion}
+
+% --- Abbreviations ---
+\input{sections/99_abbreviations}
 
 % --- Bibliography ---
 \clearpage

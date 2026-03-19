@@ -26,8 +26,8 @@ cheapest and fastest of these are \concept{bitwise logic operations}:
 ]
   % AND gate
   \node[gate, fill=bitblue!15] (and) at (0,0) {AND};
-  \node[bit, left=0.8cm] (a1) at (and.west) {1};
-  \node[bit, left=0.8cm] (a2) at ([yshift=-0.5cm]and.west) {0};
+  \node[bit, left=0.8cm] (a1) at ([yshift=0.2cm]and.west) {1};
+  \node[bit, left=0.8cm] (a2) at ([yshift=-0.2cm]and.west) {0};
   \node[bit, right=0.8cm] (a3) at (and.east) {0};
   \draw[->] (a1) -- (and.west |- a1);
   \draw[->] (a2) -- (and.west |- a2);
@@ -36,8 +36,8 @@ cheapest and fastest of these are \concept{bitwise logic operations}:
 
   % OR gate
   \node[gate, fill=bitgreen!15] (or) at (3.9,0) {OR};
-  \node[bit, left=0.8cm] (b1) at (or.west) {1};
-  \node[bit, left=0.8cm] (b2) at ([yshift=-0.5cm]or.west) {0};
+  \node[bit, left=0.8cm] (b1) at ([yshift=0.2cm]or.west) {1};
+  \node[bit, left=0.8cm] (b2) at ([yshift=-0.2cm]or.west) {0};
   \node[bit, right=0.8cm] (b3) at (or.east) {1};
   \draw[->] (b1) -- (or.west |- b1);
   \draw[->] (b2) -- (or.west |- b2);
@@ -46,8 +46,8 @@ cheapest and fastest of these are \concept{bitwise logic operations}:
 
   % XOR gate
   \node[gate, fill=bitorange!15] (xor) at (7.8,0) {XOR};
-  \node[bit, left=0.8cm] (c1) at (xor.west) {1};
-  \node[bit, left=0.8cm] (c2) at ([yshift=-0.5cm]xor.west) {0};
+  \node[bit, left=0.8cm] (c1) at ([yshift=0.2cm]xor.west) {1};
+  \node[bit, left=0.8cm] (c2) at ([yshift=-0.2cm]xor.west) {0};
   \node[bit, right=0.8cm] (c3) at (xor.east) {1};
   \draw[->] (c1) -- (xor.west |- c1);
   \draw[->] (c2) -- (xor.west |- c2);
@@ -109,7 +109,9 @@ are~1. Most modern CPUs have a dedicated popcount instruction.
     {popcount};
 \end{tikzpicture}
 \caption{The popcount operation counts the number of set bits (1s) in
-  a binary word. Combined with XNOR, it becomes a similarity measure.}
+  a binary word. Combined with XNOR, it becomes a similarity
+  measure---see \cref{sec:bnn} for how this replaces multiplication
+  in binary neural networks.}
 \label{fig:popcount}
 \end{figure}
 
@@ -196,9 +198,14 @@ chip~\cite{horowitz2014energy}.
 
 \begin{table}[htbp]
 \centering
-\caption{Energy cost of arithmetic operations (45\,nm technology).
-  Bitwise operations are 1--2 orders of magnitude cheaper than
-  floating-point multiplication.}
+\caption{Energy cost of arithmetic operations at a 45\,nm process
+  node~\cite{horowitz2014energy}. Modern processors use much smaller
+  nodes (5--7\,nm), which lowers \emph{absolute} energies roughly
+  5--10$\times$~\cite{stillmaker2017scaling}. However, the \emph{ratios}
+  between operation types are determined by algorithmic complexity (a
+  multiplier uses $O(n^2)$ gates, an adder $O(n)$, a bitwise operation
+  $O(1)$ per bit) and therefore remain approximately constant across
+  process generations.}
 \label{tab:op-cost}
 \begin{tabular}{@{}lrr@{}}
   \toprule
@@ -206,9 +213,11 @@ chip~\cite{horowitz2014energy}.
   \midrule
   Bitwise AND/OR/XOR      & 0.1                  & 1$\times$ \\
   Bit shift                & 0.1                  & 1$\times$ \\
-  Integer addition (32-bit)& 0.9                  & 9$\times$ \\
+  Integer add (8-bit)      & 0.03                 & 0.3$\times$ \\
+  Integer multiply (8-bit) & 0.2                  & 2$\times$ \\
+  Integer add (32-bit)     & 0.1                  & 1$\times$ \\
   Integer multiply (32-bit)& 3.1                  & 31$\times$ \\
-  FP addition (32-bit)     & 0.9                  & 9$\times$ \\
+  FP add (32-bit)          & 0.9                  & 9$\times$ \\
   FP multiply (32-bit)     & 3.7                  & 37$\times$ \\
   Memory access (SRAM)     & 5.0                  & 50$\times$ \\
   Memory access (DRAM)     & 640.0                & 6400$\times$ \\
@@ -241,7 +250,14 @@ If every input and every weight is a single bit, then AND, OR, XOR,
 and NOT are the \emph{natural} operations---they map exactly onto
 the logic of combining two Boolean propositions. XNOR on two 1-bit
 values tells you whether they agree. Popcount on a vector of XNOR
-results tells you how many positions agree---a Hamming similarity.
+results tells you how many positions agree---a Hamming
+similarity.\footnote{The \emph{Hamming distance} between two binary
+strings is the number of positions at which the bits differ. It was
+introduced by Richard Hamming in~1950 for error-detecting codes.
+\emph{Hamming similarity} is the complement: the number of positions
+that \emph{agree}. For two $n$-bit strings $a$ and~$b$:
+$\text{similarity} = n - \text{distance}
+= \operatorname{popcount}(\operatorname{XNOR}(a,b))$.}
 This is maximally hardware-efficient: a 64-bit CPU processes 64
 independent 1-bit operations in a single instruction.
 
@@ -470,14 +486,14 @@ digit images (60,000 for training, 10,000 for testing), each
     11/13/80, 12/13/200, 13/13/255, 14/13/255, 15/13/200
   }{
     \pgfmathsetmacro{\intensity}{\c/255*100}
-    \fill[bitblue!\intensity] (\x,\y) rectangle ++(1,1);
+    \fill[black!\intensity] (\x,\y) rectangle ++(1,1);
   }
 
   % Arrow
   \draw[-{Stealth}, very thick, bitgray] (30, 14) -- (34, 14);
 
   % Vector representation
-  \node[font=\small\sffamily, right] at (35, 24) {784 input values};
+  \node[font=\small\sffamily, anchor=south] at (37, 23) {784 inputs};
   \draw[thick] (35, 5) -- (35, 22);
   \foreach \y/\v in {21/0.00, 19.5/0.00, 18/0.31, 16.5/0.78, 15/1.00,
     13.5/0.78, 12/\ldots, 10.5/0.00, 9/0.00, 7.5/\ldots, 6/0.85} {
@@ -488,7 +504,7 @@ digit images (60,000 for training, 10,000 for testing), each
   \draw[-{Stealth}, very thick, bitgray] (41, 14) -- (45, 14);
 
   % Output
-  \node[font=\sffamily, right] at (46, 24) {Output};
+  \node[font=\small\sffamily, anchor=south] at (51, 23) {Output};
   \foreach \d [count=\i from 0] in {0,1,2,3,4,5,6,7,8,9} {
     \pgfmathsetmacro{\ypos}{22 - \i * 2.0}
     \node[font=\small\ttfamily, right] at (46, \ypos) {\d};
@@ -521,12 +537,17 @@ paradigm's section.
 
 Training a neural network means adjusting its parameters (weights,
 thresholds, gate types, spline coefficients---depending on the paradigm)
-so that the network's outputs match the correct answers on the training
-data. In traditional networks, this uses \concept{gradient descent}:
+so that the network's outputs match the \emph{known correct answers} in
+a labelled training set. This is \concept{supervised learning}: each
+training example comes with the right answer (e.g.\ an image of a~3
+paired with the label ``3''), and the network learns by comparing its
+prediction to that label. In traditional networks, this comparison-and-correction
+cycle uses \concept{gradient descent}:
 
 \begin{enumerate}[leftmargin=2em]
   \item Run inputs through the network (\emph{forward pass}).
-  \item Measure how wrong the output is (\emph{loss}).
+  \item Measure how wrong the output is by comparing it to the known
+    correct answer---this score is called the \emph{loss}.
   \item Compute how each parameter contributed to the error
     (\emph{backward pass / backpropagation}).
   \item Nudge each parameter a tiny step in the direction that
@@ -534,21 +555,29 @@ data. In traditional networks, this uses \concept{gradient descent}:
 \end{enumerate}
 
 \begin{engineernote}
-Backpropagation requires that every operation in the network be
-\emph{differentiable}---that we can compute its derivative. Logic
-gates (AND, OR, XOR) are \emph{not} differentiable: their output
-jumps discretely from 0 to~1 with no smooth transition. This is
-the central challenge of bitwise neural networks, and each paradigm
+Backpropagation works by applying the chain rule of calculus: starting
+from the loss, it computes the derivative of each layer's output with
+respect to that layer's parameters, then chains these derivatives
+together to propagate the error signal all the way back to the first
+layer. This requires that every operation in the network be
+\emph{differentiable}---that we can compute how a tiny change in its
+input affects its output. Logic gates (AND, OR, XOR) are \emph{not}
+differentiable: their output jumps discretely from~0 to~1 with no
+smooth transition, so the derivative is either zero or undefined. This
+is the central challenge of bitwise neural networks, and each paradigm
 solves it differently:
 \begin{itemize}[leftmargin=1em]
   \item BNNs use the ``straight-through estimator''~\cite{bengio2013ste}---pretend the
-    derivative exists.
-  \item Tsetlin Machines~\cite{granmo2018tsetlin} avoid gradients entirely, using reinforcement
-    learning.
+    derivative exists (\cref{sec:bnn}).
+  \item Tsetlin Machines~\cite{granmo2018tsetlin} avoid gradients entirely, using
+    \emph{reinforcement learning}---a training paradigm where each
+    component receives simple reward/penalty signals (``that clause
+    was useful'' or ``that clause was not'') and adjusts its behaviour
+    accordingly, with no derivatives required (\cref{sec:tsetlin}).
   \item LGNs~\cite{petersen2022difflogic} use a continuous relaxation that converges to discrete
-    gates.
+    gates (\cref{sec:lgn}).
   \item KANs train in continuous space and discretise only at
-    deployment.
+    deployment (\cref{sec:kan}).
 \end{itemize}
 \end{engineernote}
 

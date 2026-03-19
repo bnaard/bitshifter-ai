@@ -32,10 +32,18 @@ PDFs downloaded from arXiv for offline reference. Organised by arXiv ID.
 |----------|-------------|-------|------|
 | 1905.09688 | granmo2019convtm | The Convolutional Tsetlin Machine | 2019 |
 
+## Overview Document References (added 2026-03-19)
+
+| arXiv ID | Citation Key | Title | Year |
+|----------|-------------|-------|------|
+| 2210.17323 | frantar2022gptq | GPTQ: Accurate Post-Training Quantization for Generative Pre-trained Transformers | 2022 |
+| 2306.00978 | lin2023awq | AWQ: Activation-Aware Weight Quantization for LLM Compression and Acceleration | 2023 |
+
 ## Not Downloaded
 
 Papers without freely accessible PDFs (conference proceedings, books, paywalled):
 
+- Stillmaker & Baas 2017 — Scaling Equations for CMOS Device Performance (Integration, DOI: 10.1016/j.vlsi.2017.02.002)
 - Horowitz 2014 — Computing's Energy Problem (IEEE ISSCC, DOI: 10.1109/ISSCC.2014.6757323)
 - LeCun 1998 — Gradient-Based Learning Applied to Document Recognition
 - Courbariaux 2016 — Binarized Neural Networks (NeurIPS)
