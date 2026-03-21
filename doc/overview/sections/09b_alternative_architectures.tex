@@ -1,0 +1,907 @@
+% ============================================================================
+\section{Beyond Transformers: Alternative Architectures}
+\label{sec:alt-architectures}
+% ============================================================================
+
+The previous section built a detailed understanding of the transformer
+architecture and its attention mechanism. Transformers dominate modern
+AI, but they carry a fundamental cost: the self-attention mechanism
+scales \emph{quadratically} with sequence length. Processing a
+sequence of $n$ tokens requires $O(n^2)$ operations and $O(n^2)$
+memory for the attention matrix. At inference time, the
+\concept{KV cache}---the stored keys and values from all previous
+tokens---grows linearly with context length and must be held in fast
+memory.
+
+This quadratic bottleneck has motivated a wave of alternative
+architectures that aim to match transformer quality while achieving
+linear or even constant per-token cost. For our bitwise AI project,
+these alternatives are especially interesting: many replace the
+softmax attention (the hardest component to binarise, as discussed in
+\cref{sec:transformers-llms}) with simple recurrent updates that
+naturally map to integer arithmetic.
+
+This section surveys the most promising alternatives in order of
+relevance to bitwise computation, then compares them systematically.
+
+% ----------------------------------------------------------------------------
+\subsection{State Space Models: Mamba}
+\label{sec:mamba}
+% ----------------------------------------------------------------------------
+
+\subsubsection{The Core Idea: Attention Without a Matrix}
+
+Recall from \cref{sec:transformers-llms} that self-attention works by
+having every token ``look at'' every other token through the $QK^T$
+matrix. This is powerful but expensive: if you double the sequence
+length, the attention computation quadruples.
+
+\concept{State Space Models} (SSMs) take a fundamentally different
+approach. Instead of computing pairwise relationships between all
+tokens, an SSM maintains a compact \emph{hidden state} that
+summarises everything seen so far. Each new token updates this state
+through a simple recurrence:
+
+\begin{equation}
+  \mathbf{h}_t = \mathbf{A} \mathbf{h}_{t-1} + \mathbf{B} x_t,
+  \qquad
+  y_t = \mathbf{C} \mathbf{h}_t
+  \label{eq:ssm-recurrence}
+\end{equation}
+
+where $\mathbf{h}_t$ is the hidden state at step $t$, $x_t$ is the
+current input, and $y_t$ is the output. The matrices $\mathbf{A}$,
+$\mathbf{B}$, and $\mathbf{C}$ control how the state evolves, how
+input enters, and how output is read.
+
+\begin{analogy}
+Think of a transformer as a conference room where everyone can hear
+everyone else---powerful, but the noise scales with the number of
+people. An SSM is more like a relay runner passing a baton: each
+runner (token) receives the baton (hidden state), adds their
+contribution, and passes it forward. The baton has a fixed size
+regardless of how many runners came before.
+\end{analogy}
+
+The key innovation of \concept{Mamba}~\cite{gu2024mamba} is making
+the parameters $\mathbf{B}$, $\mathbf{C}$, and a discretisation step
+$\boldsymbol{\Delta}$ \emph{input-dependent}---they change based on
+what the current token is. This \concept{selective} mechanism allows
+the model to decide what to remember and what to forget, analogous to
+the gating in LSTMs but with much simpler arithmetic:
+
+\begin{equation}
+  \mathbf{B}_t = \text{Linear}(x_t), \quad
+  \mathbf{C}_t = \text{Linear}(x_t), \quad
+  \boldsymbol{\Delta}_t = \text{softplus}(\text{Linear}(x_t))
+  \label{eq:mamba-selective}
+\end{equation}
+
+The discretised state transition becomes:
+\begin{equation}
+  \bar{\mathbf{A}}_t = \exp(\boldsymbol{\Delta}_t \mathbf{A}), \qquad
+  \bar{\mathbf{B}}_t = \boldsymbol{\Delta}_t \mathbf{B}_t
+  \label{eq:mamba-discretise}
+\end{equation}
+
+\begin{keyinsight}
+The Mamba recurrence $\mathbf{h}_t = \bar{\mathbf{A}}_t
+\mathbf{h}_{t-1} + \bar{\mathbf{B}}_t x_t$ is structurally a
+\textbf{multiply-accumulate with decay}---the same operation as a
+digital IIR filter. There is no softmax, no exponentiation over
+sequences, no quadratic matrix. The entire inference step is a
+matrix-vector multiply plus an addition. This is exactly the kind of
+operation that maps naturally to integer and bitwise arithmetic.
+\end{keyinsight}
+
+\subsubsection{Architecture of a Mamba Block}
+
+Each Mamba block follows a specific pattern, illustrated in
+\cref{fig:mamba-block}:
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth,
+  comp/.style={draw, rounded corners=3pt, minimum height=0.7cm,
+    minimum width=3.2cm, font=\small\sffamily, align=center,
+    inner sep=4pt},
+  arr/.style={-{Stealth[length=4pt]}, thick},
+  plus/.style={circle, draw, minimum size=0.35cm, font=\tiny,
+    fill=bitgreen!10, inner sep=0pt},
+]
+  % Input
+  \node[comp, fill=bitgray!10] (input) at (0, 0) {Input $x$};
+
+  % Two branches
+  \node[comp, fill=bitblue!10] (lin1) at (-2, 1.5) {Linear proj.};
+  \node[comp, fill=bitblue!10] (lin2) at (2, 1.5) {Linear proj.};
+
+  % Left branch
+  \node[comp, fill=bitorange!10] (conv) at (-2, 3) {Conv1d};
+  \node[comp, fill=bitorange!10] (silu1) at (-2, 4.5) {SiLU};
+  \node[comp, fill=bitpurple!15] (ssm) at (-2, 6)
+    {SSM\\[-2pt]\scriptsize$(A, B_t, C_t, \Delta_t)$};
+
+  % Right branch
+  \node[comp, fill=bitorange!10] (silu2) at (2, 4.5) {SiLU};
+
+  % Multiply gate
+  \node[font=\Large] (mult) at (0, 6) {$\otimes$};
+
+  % Output projection
+  \node[comp, fill=bitblue!10] (outproj) at (0, 7.5) {Linear proj.};
+  \node[comp, fill=bitgray!10] (output) at (0, 9) {Output};
+
+  % Arrows
+  \draw[arr] (input) -- (-2, 0.8) -- (lin1);
+  \draw[arr] (input) -- (2, 0.8) -- (lin2);
+  \draw[arr] (lin1) -- (conv);
+  \draw[arr] (conv) -- (silu1);
+  \draw[arr] (silu1) -- (ssm);
+  \draw[arr] (ssm) -- (mult);
+  \draw[arr] (lin2) -- (silu2);
+  \draw[arr] (silu2) -- (2, 6) -- (mult);
+  \draw[arr] (mult) -- (outproj);
+  \draw[arr] (outproj) -- (output);
+
+  % Annotations
+  \node[font=\scriptsize\sffamily, bitblue, anchor=east] at (-3.8, 3)
+    {local context};
+  \node[font=\scriptsize\sffamily, bitpurple, anchor=east] at (-3.8, 6)
+    {selective state space};
+  \node[font=\scriptsize\sffamily, bitorange, anchor=west] at (3.8, 4.5)
+    {gating branch};
+\end{tikzpicture}
+\caption[Architecture of a single Mamba block.]{%
+  Architecture of a single Mamba block. The input is projected along
+  two branches. The left branch applies a 1D convolution (for local
+  context), a SiLU activation, and the selective SSM. The right branch
+  provides a gating signal via SiLU. The element-wise product
+  ($\otimes$) of the two branches is projected to produce the block
+  output. Compare with the transformer block in
+  \cref{fig:full-llm}---the SSM replaces the entire multi-head
+  attention sub-layer.}
+\label{fig:mamba-block}
+\end{figure}
+
+The block has two branches: a \emph{processing branch} (convolution
+followed by the selective SSM) and a \emph{gating branch} (a simple
+nonlinearity). These are combined by element-wise multiplication,
+mirroring the gated linear unit (GLU) pattern common in modern
+transformers.
+
+\subsubsection{Complexity Comparison}
+
+The computational advantage is stark:
+
+\begin{center}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Operation} & \textbf{Transformer} & \textbf{Mamba} \\
+\midrule
+Training (per layer) & $O(n^2 d)$ & $O(n d s)$ \\
+Inference per token & $O(n d)$ & $O(d s)$ \\
+Memory (KV cache) & $O(n d)$ & $O(d s)$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent where $n$ is sequence length, $d$ is model dimension, and
+$s$ is the SSM state size (typically 16--64, independent of $n$).
+At inference time, Mamba processes each token in $O(1)$ with respect
+to sequence length---there is no KV cache that grows with context.
+
+\subsubsection{Mamba-2, Mamba-3, and Scaling}
+
+\concept{Mamba-2}~\cite{dao2024mamba2} introduced the
+\concept{State Space Duality} (SSD) framework, showing that the
+selective SSM can be equivalently computed as a structured
+(semiseparable) matrix multiplication. This enables efficient hardware
+utilisation via tensor cores, achieving 2--8$\times$ speedup over
+the original Mamba while maintaining identical expressiveness.
+
+\concept{Mamba-3} (ICLR 2026) extends the framework further with
+complex-valued state matrices and MIMO (multiple-input,
+multiple-output) state transitions, improving the model's ability
+to track multiple independent ``threads'' of information
+simultaneously.
+
+The largest pure Mamba models include \concept{Falcon
+Mamba}~7B~\cite{zuo2024falcon} and \concept{Codestral Mamba}~7B
+(Mistral). Falcon Mamba~7B outperforms Llama~3~8B on
+ARC, TruthfulQA, and GSM8K benchmarks while requiring
+significantly less inference memory (no KV cache).
+
+\subsubsection{The Recall Problem}
+
+\begin{engineernote}
+Pure SSMs have a fundamental limitation: the hidden state has a fixed
+size. Once information is compressed into this state, it cannot be
+perfectly recovered. Tasks requiring \concept{associative recall}---``what
+word appeared after `elephant' three paragraphs ago?''---are difficult
+because the model must have retained that specific association in its
+finite state vector. Transformers, by contrast, store every token's
+key and value in the KV cache and can look up any of them at any
+time. This is not a minor issue: it is the primary motivation for the
+hybrid architectures discussed in \cref{sec:hybrid-archs}.
+\end{engineernote}
+
+\subsubsection{Bitwise Relevance}
+
+The Mamba recurrence is exceptionally well-suited to
+integer arithmetic:
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{Bi-Mamba}~\cite{ma2024bimamba} applies 1-bit
+    weight quantisation to Mamba, achieving performance matching
+    GPTQ 8-bit quantised transformers---with $8\times$ less weight
+    memory.
+  \item \textbf{LightMamba}~\cite{lightmamba2025} implements Mamba
+    on FPGA at 4-bit precision, demonstrating $6\times$ energy
+    efficiency improvement over GPU implementations.
+  \item The core recurrence $\mathbf{h}_t = \bar{\mathbf{A}}
+    \mathbf{h}_{t-1} + \bar{\mathbf{B}} x_t$ requires only
+    multiply-accumulate---no softmax, no exponentiation, no
+    division. Each of these operations can be replaced by
+    fixed-point multiplication or, with appropriate quantisation,
+    by bit-shifts and additions.
+\end{itemize}
+
+% ----------------------------------------------------------------------------
+\subsection{RWKV: A Trainable RNN at Transformer Scale}
+\label{sec:rwkv}
+% ----------------------------------------------------------------------------
+
+While Mamba replaces attention with a state space model,
+\concept{RWKV}~\cite{peng2023rwkv} achieves a similar goal by
+rethinking the recurrent neural network (RNN). Classical RNNs suffer
+from vanishing gradients and cannot be parallelised during training.
+RWKV solves both problems with a mechanism called
+\concept{linear attention with exponential decay}.
+
+\subsubsection{The WKV Mechanism}
+
+The core operation in RWKV is the ``WKV'' (weighted key-value)
+computation. For each token position $t$:
+
+\begin{equation}
+  \text{wkv}_t = \frac{
+    e^{u + k_t} v_t + \sum_{i=1}^{t-1} e^{-(t-i)w + k_i} v_i
+  }{
+    e^{u + k_t} + \sum_{i=1}^{t-1} e^{-(t-i)w + k_i}
+  }
+  \label{eq:rwkv-wkv}
+\end{equation}
+
+where $w$ is a learned decay rate, $u$ is a bonus for the current
+token, and $k_i, v_i$ are key and value vectors. The exponential
+decay $e^{-(t-i)w}$ means that older tokens contribute
+exponentially less---a built-in ``forgetting'' mechanism.
+
+\begin{analogy}
+If a transformer is a conference room (everyone hears everyone) and
+Mamba is a relay race (pass the baton), then RWKV is like a
+conversation where recent statements are crisp and clear, but older
+ones fade into memory. You can still recall them, but with
+decreasing clarity. The decay rate $w$ controls how fast the ``fog''
+sets in.
+\end{analogy}
+
+The crucial property is that \cref{eq:rwkv-wkv} can be computed
+\emph{either} as a parallel scan (for training) \emph{or} as a
+recurrence (for inference). During training, all positions are
+processed simultaneously with $O(n)$ total work. During inference,
+each new token updates a fixed-size state in $O(1)$ time and
+constant memory.
+
+\subsubsection{RWKV-7 ``Goose'' and the Generalised Delta Rule}
+
+The latest version, \concept{RWKV-7}~\cite{peng2025rwkv7}, replaces
+the simple exponential decay with a \concept{Generalised Delta Rule}
+that allows the model to learn more complex forgetting patterns.
+RWKV-7 at 2.9B parameters matches the quality of Qwen2.5-3B (a
+transformer) trained on $3\times$ more tokens.
+
+RWKV has achieved remarkable real-world deployment:
+
+\begin{itemize}[leftmargin=2em]
+  \item Deployed on \textbf{1.5~billion Windows devices} for
+    Microsoft Copilot edge scenarios, where constant-memory inference
+    is critical.
+  \item Open-source models from 0.1B to 14B parameters, trained by
+    the RWKV Foundation community.
+  \item The RWKV-7 architecture is available at sizes competitive
+    with the latest transformer-based models.
+\end{itemize}
+
+\subsubsection{Bitwise Relevance}
+
+RWKV is arguably the \emph{most} bitwise-amenable of all
+alternative architectures:
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{3-bit quantisation} with less than 1\% accuracy
+    loss has been demonstrated, pushing close to the
+    binary/ternary regime.
+  \item \textbf{INT8 NEON kernels} are available for ARM
+    processors, enabling efficient mobile deployment with integer
+    arithmetic only.
+  \item The WKV computation is dominated by multiply-accumulate
+    with exponential decay---the same structure as a digital
+    low-pass filter, which can be implemented with fixed-point
+    arithmetic or even bit-shift approximations.
+  \item The $O(1)$ inference memory means the model never builds a
+    large dynamic data structure (like a KV cache) that would
+    complicate fixed-point implementation.
+\end{itemize}
+
+\begin{keyinsight}
+RWKV combines three properties that are rare together: transformer-competitive
+quality, constant-memory inference, and demonstrated extreme
+quantisation. For bitwise AI, this makes RWKV a strong candidate as
+a backbone architecture---potentially easier to binarise than either
+transformers or Mamba.
+\end{keyinsight}
+
+% ----------------------------------------------------------------------------
+\subsection{Hybrid Architectures: Best of Both Worlds}
+\label{sec:hybrid-archs}
+% ----------------------------------------------------------------------------
+
+The recall limitation of pure SSMs and RNNs
+(\cref{sec:mamba}) has led to a pragmatic solution:
+\concept{hybrid architectures} that interleave efficient recurrent
+layers with a small number of attention layers. The attention layers
+handle the tasks that require precise recall; the recurrent layers
+handle everything else at linear cost.
+
+\subsubsection{Jamba (AI21 Labs)}
+
+\concept{Jamba}~\cite{lieber2024jamba} was the first large-scale
+hybrid, combining Mamba layers, attention layers, and
+mixture-of-experts (MoE) in a single model:
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{398B total parameters, 94B active} per token (MoE
+    routing activates only a subset of experts).
+  \item Interleaves Mamba and attention layers at a ratio of roughly
+    7:1 (one attention layer every 8 layers).
+  \item At 256K context length, requires only \textbf{4\,GB of KV
+    cache memory}---compared to $\sim$128\,GB for a pure transformer
+    of similar size.
+  \item Matches or exceeds Mixtral 8$\times$7B on standard
+    benchmarks.
+\end{itemize}
+
+\subsubsection{Falcon H1 and H1R (TII)}
+
+The \concept{Falcon H1}~\cite{tii2025falconh1} series takes a
+different approach: instead of alternating layers, it places SSM and
+attention \emph{heads} in \textbf{parallel within the same mixer
+block}. Some heads attend, others recur, and their outputs are
+combined:
+
+\begin{itemize}[leftmargin=2em]
+  \item Falcon H1 0.5B--34B parameter range, with the 7B model
+    beating transformer models of 32B--47B parameters on several
+    benchmarks.
+  \item \textbf{Falcon H1R}~\cite{tii2026falconh1r} extends this
+    with a recurrent-only variant for edge deployment.
+  \item The parallel design avoids the ``attention every $k$ layers''
+    pattern and allows more flexible resource allocation.
+\end{itemize}
+
+\subsubsection{Bamba (IBM)}
+
+\concept{Bamba}~\cite{ibm2025bamba} combines Mamba-2 layers with
+global attention layers, optimised for throughput:
+
+\begin{itemize}[leftmargin=2em]
+  \item Achieves $2\times$ throughput compared to pure transformer
+    baselines of similar quality.
+  \item Incorporated into IBM's Granite~4.0 model family.
+  \item Demonstrates that the hybrid pattern is becoming an industry
+    standard, not just a research curiosity.
+\end{itemize}
+
+\subsubsection{Kimi Linear (Moonshot AI)}
+
+\concept{Kimi Linear}~\cite{kimi2025linear} replaces softmax attention
+with \concept{linear attention}, achieving:
+
+\begin{itemize}[leftmargin=2em]
+  \item 75\% reduction in KV cache memory.
+  \item The first linear-attention model to \emph{beat} full
+    softmax attention on standard benchmarks at comparable scale.
+  \item Demonstrates that the attention mechanism itself can be
+    linearised without quality loss, given sufficient scale and
+    training.
+\end{itemize}
+
+\begin{engineernote}
+The hybrid pattern is converging across the industry: IBM (Bamba/Granite),
+AI21 (Jamba), TII (Falcon H1), and Moonshot (Kimi) have all
+independently adopted architectures that mix efficient recurrent
+layers with selective attention. This is not a coincidence---it
+reflects a fundamental architectural insight that different layers in
+a deep network serve different functions, and not all of them need
+the full power (and cost) of attention.
+\end{engineernote}
+
+% ----------------------------------------------------------------------------
+\subsection{Other Notable Approaches}
+\label{sec:other-alt-archs}
+% ----------------------------------------------------------------------------
+
+Several other architectures deserve mention for their distinct
+contributions, even if they are less directly relevant to bitwise
+computation.
+
+\subsubsection{RetNet (Microsoft)}
+
+\concept{RetNet}~\cite{sun2023retnet} introduces \concept{multi-scale
+retention}, a mechanism that supports three computation modes:
+parallel (for training), recurrent (for $O(1)$ inference), and
+chunkwise (a hybrid). The multi-scale design uses different decay
+rates at different heads, allowing the model to attend to both
+short-range and long-range patterns simultaneously.
+
+\subsubsection{xLSTM (Hochreiter)}
+
+\concept{xLSTM}~\cite{beck2024xlstm}, from the original inventor of
+the LSTM, modernises the classic architecture with exponential gating
+and a matrix-valued memory cell. Key results include 40\% lower power
+consumption than comparably-sized transformers, making it relevant for
+energy-constrained deployment---though its more complex gating
+mechanism is harder to binarise than Mamba or RWKV.
+
+\subsubsection{Titans (Google DeepMind)}
+
+\concept{Titans}~\cite{behrouz2025titans} augments attention with a
+learned long-term memory module that can store and retrieve
+information across very long contexts. It beats GPT-4 on
+needle-in-a-haystack retrieval tasks, addressing the recall
+limitation of SSMs from a different angle---by adding explicit
+memory rather than falling back to attention.
+
+\subsubsection{Mercury (Inception Labs)}
+
+\concept{Mercury}~\cite{inception2025mercury} takes a radically
+different approach: instead of generating tokens one at a time
+(autoregressive), it uses a \concept{diffusion} process to generate
+multiple tokens in parallel. This achieves throughput of
+approximately 1{,}000 tokens per second on consumer hardware---an
+order of magnitude faster than autoregressive models of similar size.
+While not directly related to bitwise computation, it demonstrates
+that the autoregressive bottleneck itself may be optional.
+
+% ----------------------------------------------------------------------------
+\subsection{Architecture Comparison}
+\label{sec:alt-arch-comparison}
+% ----------------------------------------------------------------------------
+
+\Cref{tab:arch-comparison} provides a systematic comparison of all
+architectures discussed in this section alongside the transformer
+baseline.
+
+\begin{table}[htbp]
+\centering
+\caption[Comparison of sequence modelling architectures.]{%
+  Comparison of sequence modelling architectures. Complexity is given
+  per layer, where $n$ is sequence length, $d$ is model dimension,
+  and $s$ is SSM state size. ``Quality vs.\ Transformer'' indicates
+  performance at comparable model size. Bitwise amenability reflects
+  the ease of replacing floating-point operations with integer or
+  binary arithmetic.}
+\label{tab:arch-comparison}
+\small
+\begin{tabularx}{\textwidth}{@{}l c c c c c c@{}}
+\toprule
+\textbf{Architecture} &
+\textbf{\shortstack{Train\\complexity}} &
+\textbf{\shortstack{Inference\\per token}} &
+\textbf{\shortstack{KV/state\\memory}} &
+\textbf{\shortstack{Largest\\model}} &
+\textbf{\shortstack{Production\\deployed?}} &
+\textbf{\shortstack{Bitwise\\amenability}} \\
+\midrule
+Transformer &
+  $O(n^2 d)$ & $O(nd)$ & $O(nd)$ &
+  $>$1T & Yes &
+  \textcolor{bitorange}{Medium} \\
+Mamba (SSM) &
+  $O(nds)$ & $O(ds)$ & $O(ds)$ &
+  7B & Yes &
+  \textcolor{bitgreen}{\textbf{High}} \\
+RWKV &
+  $O(nd)$ & $O(d)$ & $O(d)$ &
+  14B & Yes &
+  \textcolor{bitgreen}{\textbf{High}} \\
+Jamba (hybrid) &
+  $O(nd)^*$ & $O(d)^*$ & $O(nd)^{\dagger}$ &
+  398B & Yes &
+  \textcolor{bitorange}{Medium} \\
+Falcon H1 &
+  $O(nd)^*$ & $O(d)^*$ & $O(nd)^{\dagger}$ &
+  34B & Yes &
+  \textcolor{bitorange}{Medium} \\
+RetNet &
+  $O(nd)$ & $O(d)$ & $O(d)$ &
+  6.7B & No &
+  \textcolor{bitorange}{Medium} \\
+xLSTM &
+  $O(nd)$ & $O(d)$ & $O(d^2)$ &
+  7B & No &
+  \textcolor{bitorange}{Medium} \\
+Titans &
+  $O(n^2 d)$ & $O(nd)$ & $O(nd)$ &
+  --- & No &
+  \textcolor{red!70!black}{Low} \\
+Mercury &
+  $O(n^2 d)$ & $O(d)^{\ddagger}$ & $O(nd)$ &
+  --- & Yes &
+  \textcolor{red!70!black}{Low} \\
+\bottomrule
+\multicolumn{7}{@{}l}{%
+  \scriptsize $^*$Amortised over recurrent layers; attention layers
+  remain $O(n^2d)$.
+  $^{\dagger}$Reduced by $\sim\!75$--$97\%$ vs.\ pure transformer.
+  $^{\ddagger}$Parallel generation amortises cost.
+} \\
+\end{tabularx}
+\end{table}
+
+% ----------------------------------------------------------------------------
+\subsection{Implications for This Project}
+\label{sec:alt-arch-implications}
+% ----------------------------------------------------------------------------
+
+The alternative architectures surveyed above share a crucial
+property: they replace the softmax attention bottleneck with
+\concept{simple recurrent updates}---multiply-accumulate with decay,
+weighted sums with exponential forgetting, or gated state
+transitions. These are structurally identical to the operations
+found in \concept{digital signal processing} (DSP): IIR filters,
+exponential moving averages, and leaky integrators.
+
+\begin{keyinsight}
+The connection between SSMs and DSP is not a loose analogy---it is a
+mathematical identity. The Mamba recurrence
+$h_t = \bar{A} h_{t-1} + \bar{B} x_t$ \emph{is} a first-order IIR
+filter. The RWKV exponential decay \emph{is} an exponential moving
+average. These are operations that DSP engineers have implemented in
+fixed-point integer arithmetic for decades, on hardware as simple as
+8-bit microcontrollers. The ``bitwise bottleneck'' that makes
+transformer attention so hard to binarise simply does not exist in
+these architectures.
+\end{keyinsight}
+
+This observation connects directly to the sound synthesis vision
+outlined in the project roadmap. Classical physical modelling synthesis
+(Karplus-Strong, waveguide models) already operates with
+near-bitwise operations: delay lines, low-pass filters (which are
+just multiply-accumulate with decay), and feedback loops. An
+SSM-based architecture for audio generation would use the
+\emph{same} computational primitives as the synthesis algorithms it
+aims to learn.
+
+\Cref{fig:bitwise-ssm-mapping} illustrates how the four bitwise
+paradigms from this article map onto SSM components---analogous to
+the transformer mapping in \cref{sec:scaling-llms}.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth,
+  comp/.style={draw, rounded corners=4pt, minimum height=1cm,
+    minimum width=3.5cm, font=\small\sffamily, align=center,
+    inner sep=5pt},
+  paradigm/.style={draw, rounded corners=2pt, minimum height=0.6cm,
+    font=\scriptsize\sffamily, align=center, inner sep=3pt,
+    dashed, thick},
+  arr/.style={-{Stealth[length=4pt]}, thick, bitgray},
+  maparr/.style={-{Stealth[length=3pt]}, thick, dashed},
+]
+  % SSM components (left column)
+  \node[comp, fill=bitblue!10] (embed) at (0, 8) {Embedding};
+  \node[comp, fill=bitorange!10] (conv) at (0, 6.2) {Conv1d};
+  \node[comp, fill=bitpurple!15] (ssm) at (0, 4.4)
+    {SSM recurrence\\[-2pt]\scriptsize$h_t = Ah_{t-1} + Bx_t$};
+  \node[comp, fill=bitgreen!10] (gate) at (0, 2.6) {Gating (SiLU)};
+  \node[comp, fill=bitblue!10] (proj) at (0, 0.8) {Output projection};
+
+  % Arrows between components
+  \draw[arr] (embed) -- (conv);
+  \draw[arr] (conv) -- (ssm);
+  \draw[arr] (ssm) -- (gate);
+  \draw[arr] (gate) -- (proj);
+
+  % Bitwise paradigms (right column)
+  \node[paradigm, fill=bitblue!8, text=bitblue!80!black]
+    (bnn) at (7, 7.1) {BNN / BitNet\\ternary weights};
+  \node[paradigm, fill=bitorange!8, text=bitorange!80!black]
+    (lut) at (7, 5.3) {LUT compilation\\activation tables};
+  \node[paradigm, fill=bitpurple!8, text=bitpurple!80!black]
+    (lgn) at (7, 3.5) {Logic Gate Networks\\learned gate topology};
+  \node[paradigm, fill=bitgreen!8, text=bitgreen!80!black]
+    (tm) at (7, 1.7) {Tsetlin Machines\\clause-based gating};
+
+  % Mapping arrows
+  \draw[maparr, bitblue] (embed.east) -- ++(0.5,0) |- (bnn.west);
+  \draw[maparr, bitblue] (proj.east) -- ++(0.3,0) |- (bnn.west);
+  \draw[maparr, bitorange] (gate.east) -- ++(0.5,0) |- (lut.west);
+  \draw[maparr, bitorange] (conv.east) -- ++(0.3,0) |- (lut.west);
+  \draw[maparr, bitpurple] (ssm.east) -- (lgn.west);
+  \draw[maparr, bitgreen] (gate.east) -- ++(0.8,0) |- (tm.west);
+
+  % Title
+  \node[font=\small\sffamily\bfseries, anchor=south] at (0, 8.8)
+    {SSM Components};
+  \node[font=\small\sffamily\bfseries, anchor=south] at (7, 8.0)
+    {Bitwise Paradigms};
+\end{tikzpicture}
+\caption[Mapping of bitwise paradigms to SSM components.]{%
+  How the four bitwise paradigms map to SSM (Mamba/RWKV) components.
+  \textbf{BNN/BitNet} ternary weights apply to embedding and output
+  projections. \textbf{LUT compilation} replaces activation functions
+  (SiLU, softplus) and the Conv1d with lookup tables.
+  \textbf{Logic Gate Networks} can implement the SSM recurrence
+  itself as learned gate topology. \textbf{Tsetlin Machines} provide
+  interpretable clause-based gating. Compare with the transformer
+  mapping in \cref{sec:scaling-llms}.}
+\label{fig:bitwise-ssm-mapping}
+\end{figure}
+
+The project recommendation is clear: SSM-based architectures---particularly
+RWKV and Mamba---should be considered alongside transformers as
+target architectures for bitwise scaling. Their recurrent structure
+eliminates the softmax bottleneck entirely, their inference is
+constant-memory (critical for edge deployment), and their core
+operations are already proven to work at extreme quantisation levels.
+
+% ----------------------------------------------------------------------------
+% Full-page landscape diagram: Mamba architecture end-to-end
+% ----------------------------------------------------------------------------
+
+\begin{landscape}
+\begin{figure}[p]
+\centering
+\begin{tikzpicture}[>=Stealth, x=1cm, y=1cm,
+  % --- Shared styles ---
+  comp/.style={draw, rounded corners=3pt, minimum height=0.7cm,
+    font=\scriptsize\sffamily, align=center, inner sep=4pt},
+  smallcomp/.style={draw, rounded corners=2pt, minimum height=0.55cm,
+    font=\tiny\sffamily, align=center, inner sep=3pt},
+  arr/.style={-{Stealth[length=4pt]}, thick},
+  fatarr/.style={-{Stealth[length=5pt]}, very thick},
+  plus/.style={circle, draw, minimum size=0.4cm, font=\tiny,
+    fill=bitgreen!10, inner sep=0pt},
+  brace/.style={decorate, decoration={brace, amplitude=5pt, mirror}},
+  bracel/.style={decorate, decoration={brace, amplitude=5pt}},
+  lbl/.style={font=\tiny\sffamily},
+]
+
+% ============================================================================
+% COLUMN 1: Tokeniser + Embedding (same as transformer)
+% ============================================================================
+\node[font=\small\sffamily\bfseries, bitblue!80!black] at (2, 14.5)
+  {Tokeniser + Embedding};
+
+% Token boxes
+\foreach \i/\tok in {0/The, 1/\_cat, 2/\_sat, 3/\_on, 4/\_the, 5/\_mat} {
+  \node[comp, fill=bitgray!10, minimum width=1.2cm]
+    (tok\i) at ({\i*0.9+0.2}, 13) {\tok};
+}
+
+% ID boxes
+\foreach \i/\id in {0/464, 1/5023, 2/3156, 3/322, 4/279, 5/8643} {
+  \node[smallcomp, fill=bitblue!8, minimum width=1.0cm]
+    (id\i) at ({\i*0.9+0.2}, 12) {\id};
+  \draw[arr, bitgray] (tok\i) -- (id\i);
+}
+
+% Embedding table
+\node[comp, fill=bitblue!15, minimum width=5.4cm, minimum height=1.2cm]
+  (emb) at (2.45, 10.3)
+  {Embedding Table $\bm{E}$\\$V \times d$};
+\foreach \i in {0,...,5} {
+  \draw[arr, bitblue!60] (id\i) -- ({\i*0.9+0.2}, 10.95);
+}
+
+% Embedding output vectors
+\node[comp, fill=bitblue!10, minimum width=5.4cm]
+  (embout) at (2.45, 8.8)
+  {$n$ vectors, $d$ dims each};
+\draw[arr] (emb) -- (embout);
+
+% ============================================================================
+% COLUMN 2: Mamba Block (expanded)
+% ============================================================================
+\node[font=\small\sffamily\bfseries, bitorange!80!black] at (12.5, 14.5)
+  {Mamba Block (expanded)};
+
+% Input
+\node[comp, fill=bitgray!10, minimum width=2.5cm]
+  (blkin) at (12.5, 13) {Block input $x$};
+
+% Layer norm
+\node[comp, fill=bitgray!15, minimum width=2.5cm]
+  (norm1) at (12.5, 11.8) {RMSNorm};
+\draw[arr] (blkin) -- (norm1);
+
+% Two linear projections (branches)
+\node[comp, fill=bitblue!12, minimum width=2.2cm]
+  (linA) at (10.5, 10.3) {Linear ($d \!\to\! Ed$)};
+\node[comp, fill=bitblue!12, minimum width=2.2cm]
+  (linB) at (14.5, 10.3) {Linear ($d \!\to\! Ed$)};
+\draw[arr] (norm1.south) -- ++(0,-0.3) -| (linA.north);
+\draw[arr] (norm1.south) -- ++(0,-0.3) -| (linB.north);
+
+% Left branch: Conv1d
+\node[comp, fill=bitorange!12, minimum width=2.2cm]
+  (conv1d) at (10.5, 8.8) {Conv1d ($k\!=\!4$)};
+\draw[arr] (linA) -- (conv1d);
+
+% Left branch: SiLU
+\node[comp, fill=bitorange!12, minimum width=2.2cm]
+  (silu1) at (10.5, 7.5) {SiLU $\sigma(x) \!\cdot\! x$};
+\draw[arr] (conv1d) -- (silu1);
+
+% SSM parameters
+\node[comp, fill=bitpurple!15, minimum width=2.2cm, minimum height=1.0cm]
+  (ssmparams) at (10.5, 5.8)
+  {Selection\\[-2pt]\tiny $B_t, C_t, \Delta_t = f(x_t)$};
+\draw[arr] (silu1) -- (ssmparams);
+
+% SSM core
+\node[comp, fill=bitpurple!20, minimum width=2.2cm, minimum height=1.2cm]
+  (ssmcore) at (10.5, 3.8)
+  {SSM scan\\[-2pt]\tiny $h_t = \bar{A}_t h_{t\text{-}1} + \bar{B}_t x_t$\\[-2pt]
+   \tiny $y_t = C_t h_t$};
+\draw[arr] (ssmparams) -- (ssmcore);
+
+% A parameter (fixed, diagonal)
+\node[smallcomp, fill=bitpurple!8, minimum width=1.4cm]
+  (Aparam) at (8, 4.8) {\tiny $A$ (learned,\\[-2pt]\tiny diagonal)};
+\draw[arr, bitpurple!60] (Aparam) -- (ssmcore);
+
+% Right branch: SiLU (gating)
+\node[comp, fill=bitorange!12, minimum width=2.2cm]
+  (silu2) at (14.5, 7.5) {SiLU (gate)};
+\draw[arr] (linB) -- ++(0,-2.1) -- (silu2);
+
+% Element-wise multiply
+\node[font=\normalsize, inner sep=2pt] (mult) at (12.5, 2.5) {$\otimes$};
+\draw[arr] (ssmcore) -- ++(0,-0.5) -| (mult);
+\draw[arr] (silu2) -- ++(0,-4.3) -| (mult);
+
+% Output projection
+\node[comp, fill=bitblue!12, minimum width=2.5cm]
+  (outproj) at (12.5, 1.3) {Linear ($Ed \!\to\! d$)};
+\draw[arr] (mult) -- (outproj);
+
+% Residual connection
+\node[plus] (res1) at (12.5, 0.2) {$+$};
+\draw[arr] (outproj) -- (res1);
+\draw[arr, dashed, bitgreen!60!black, rounded corners=5pt]
+  (blkin.east) -- ++(1.5, 0) -- ++(0, -12.8) -- (res1.east);
+
+% Block output
+\node[comp, fill=bitgray!10, minimum width=2.5cm]
+  (blkout) at (12.5, -0.8) {Block output};
+\draw[arr] (res1) -- (blkout);
+
+% Annotations
+\node[lbl, bitorange, anchor=east, text width=1.5cm, align=right]
+  at (8.5, 8.8) {local\\context};
+\node[lbl, bitpurple, anchor=east, text width=2cm, align=right]
+  at (8.0, 5.8) {input-\\dependent};
+\node[lbl, bitpurple, anchor=east, text width=2cm, align=right]
+  at (8.0, 3.8) {selective\\scan};
+\node[lbl, bitorange, anchor=west, text width=2cm, align=left] at (16, 7.5)
+  {gating\\branch};
+\node[lbl, bitgreen!60!black, anchor=west] at (14.5, -0.1)
+  {residual};
+
+% ============================================================================
+% COLUMN 3: Stacked blocks + Output head
+% ============================================================================
+\node[font=\small\sffamily\bfseries, bitgreen!70!black] at (22, 14.5)
+  {Stack + Output Head};
+
+% Stacked blocks
+\node[comp, fill=bitorange!8, minimum width=3.5cm, minimum height=0.7cm]
+  (b1) at (22, 12.5) {Mamba Block 1};
+\node[comp, fill=bitorange!8, minimum width=3.5cm, minimum height=0.7cm]
+  (b2) at (22, 11.3) {Mamba Block 2};
+\node[font=\large, bitgray] at (22, 10.3) {$\vdots$};
+\node[comp, fill=bitorange!8, minimum width=3.5cm, minimum height=0.7cm]
+  (bN) at (22, 9.3) {Mamba Block $N$};
+
+\draw[arr] (b1) -- (b2);
+\draw[arr, bitgray, densely dotted] (b2) -- ++(0, -0.6);
+\draw[arr, bitgray, densely dotted] (22, 10.0) -- (bN);
+
+% Final norm
+\node[comp, fill=bitgray!15, minimum width=3.5cm]
+  (finalnorm) at (22, 8.0) {RMSNorm};
+\draw[arr] (bN) -- (finalnorm);
+
+% Output projection
+\node[comp, fill=bitblue!12, minimum width=3.5cm]
+  (vocabproj) at (22, 6.7) {$\bm{W}_{\text{vocab}}$ ($d \!\to\! V$)};
+\draw[arr] (finalnorm) -- (vocabproj);
+
+% Logits
+\node[comp, fill=bitgray!8, minimum width=3.5cm]
+  (logits) at (22, 5.4) {Logits (size $V$)};
+\draw[arr] (vocabproj) -- (logits);
+
+% Softmax
+\node[comp, fill=bitgreen!12, minimum width=3.5cm]
+  (softmax) at (22, 4.1) {Softmax};
+\draw[arr] (logits) -- (softmax);
+
+% Probabilities
+\node[comp, fill=bitgreen!8, minimum width=3.5cm]
+  (probs) at (22, 2.8) {Probabilities};
+\draw[arr] (softmax) -- (probs);
+
+% Sample
+\node[comp, fill=bitgreen!15, minimum width=3.5cm]
+  (sample) at (22, 1.5) {Sample next token};
+\draw[arr] (probs) -- (sample);
+
+% ============================================================================
+% CONNECTING ARROWS between columns
+% ============================================================================
+
+% Embedding to Block 1
+\draw[fatarr] (embout.east) -- ++(1, 0) |- (b1.west);
+
+% Block detail connection (from column 2 to column 3 stack)
+\draw[fatarr, bitorange!50, dashed]
+  (blkout.south) -- ++(0, -1.5) -- ++(8, 0) -- ++(0, 15.5)
+  -- (b1.south east);
+\node[lbl, bitorange, fill=white, inner sep=1pt] at (17, -2.3)
+  {detail of each block};
+
+% Autoregressive loop
+\draw[fatarr, bitgreen!70!black, rounded corners=8pt]
+  (sample.south) -- ++(0, -1) -- (2, -0.5) -- (2, 8.2);
+\node[lbl, bitgreen!70!black, fill=white, inner sep=2pt]
+  at (12, -0.5) {autoregressive loop: append token, repeat};
+
+% ============================================================================
+% TITLE
+% ============================================================================
+\node[font=\small\sffamily\bfseries, bitblue!80!black, anchor=north west]
+  at (0, 15.3)
+  {The Complete Mamba Architecture: End-to-End Pipeline};
+
+% Dimension annotations
+\node[lbl, bitgray, text width=3cm, align=center] at (2.45, 9.5)
+  {$n$ tokens\\$d$ dims each};
+
+% State size annotation
+\node[lbl, bitpurple, text width=2.5cm, align=center] at (8, 3.2)
+  {state size $s$\\(typically 16--64)};
+
+\end{tikzpicture}
+\caption[The complete Mamba architecture in a single view.]{%
+  The complete Mamba architecture in a single view. \textbf{Left:}
+  the tokeniser and embedding layer are identical to the transformer
+  (\cref{fig:llm-full-picture}). \textbf{Centre:} a single Mamba
+  block is expanded, showing the dual-branch structure: the
+  processing branch (Conv1d for local context, input-dependent
+  selection of $B_t$, $C_t$, $\Delta_t$, and the selective SSM scan)
+  and the gating branch (SiLU activation). The element-wise product
+  $\otimes$ merges both branches before the output projection. A
+  residual connection bypasses the entire block. \textbf{Right:}
+  $N$ blocks are stacked, followed by final RMSNorm and the output
+  head (vocabulary projection, softmax, sampling). The autoregressive
+  loop feeds each generated token back as input. Note the absence of
+  any $O(n^2)$ attention matrix---the entire sequence-mixing
+  computation is the $O(ds)$ SSM scan.}
+\label{fig:mamba-full-picture}
+\end{figure}
+\end{landscape}

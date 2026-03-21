@@ -176,13 +176,13 @@ is mathematically unjustified---but it works well enough in practice.
 \centering
 \begin{tikzpicture}[>=Stealth]
   % Forward pass arrow
-  \draw[->, thick, bitblue] (0, 0) -- (7, 0);
-  \node[font=\small\sffamily, bitblue, above=2pt] at (3.5, 0) {Forward pass};
+  \draw[->, thick, bitblue] (0, -0.7) -- (7, -0.7);
+  \node[font=\small\sffamily, bitblue, above=2pt] at (3.5, -0.7) {Forward pass};
 
   % Sign box above the line
   \node[draw, fill=bitblue!10, rounded corners, font=\scriptsize\sffamily,
     minimum height=0.5cm] (signbox) at (3.5, 1.5) {sign()};
-  \draw[->, thick] (signbox.south) -- (3.5, 0.15);
+  \draw[->, thick] (signbox.south) -- (3.5, -0.1);
 
   % Labels left and right of sign box
   \node[font=\scriptsize\sffamily, anchor=east] at (2.5, 1.5)

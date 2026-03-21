@@ -54,6 +54,9 @@
     }
   },
   "dockerComposeFile": "docker-compose.yml",
+  "portsAttributes": {
+    "4714": { "onAutoForward": "ignore" }
+  },
   "name": "bitshifter-ai",
   "overrideCommand": true,
   "remoteUser": "root",

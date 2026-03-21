@@ -118,6 +118,142 @@ sequence of token IDs. The model's input is always a sequence of
 integers: $[t_1, t_2, \ldots, t_n]$ where each $t_i \in
 \{0, 1, \ldots, V{-}1\}$ and $V$ is the vocabulary size.
 
+\subsubsection{How the Vocabulary Is Constructed: BPE}
+
+The vocabulary is \emph{not} learned during neural network
+training---it is constructed \textbf{beforehand} as a separate
+preprocessing step, then fixed for the lifetime of the model.
+The most common algorithm is \concept{Byte-Pair Encoding} (BPE),
+which works as follows:
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Start with bytes.} The initial vocabulary consists of
+    all 256 individual bytes (characters). Every possible text can
+    already be represented, just very inefficiently---one token per
+    character.
+
+  \item \textbf{Count pairs.} Scan the entire training corpus and
+    count how often each pair of adjacent tokens appears. For example,
+    in English text the pair (``t'', ``h'') appears far more often
+    than (``q'', ``z'').
+
+  \item \textbf{Merge the most frequent pair.} Create a new token
+    by combining the most common pair. For instance, ``t'' + ``h''
+    $\to$ ``th'' becomes token number~257.
+
+  \item \textbf{Repeat.} Go back to step~2 with the updated
+    vocabulary. Now the algorithm might find that (``th'', ``e'') is
+    the most frequent pair, so it creates ``the'' as token~258.
+    Continue until the vocabulary reaches the desired size
+    (e.g.\ 32{,}000 tokens).
+\end{enumerate}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth,
+  steplbl/.style={font=\scriptsize\sffamily, anchor=west},
+  tok/.style={draw, rounded corners=1pt, minimum height=0.45cm,
+    inner sep=3pt, font=\scriptsize\ttfamily, fill=#1!15},
+  arr/.style={->, thick, bitgray}
+]
+  % Step 0
+  \node[steplbl, font=\scriptsize\sffamily\bfseries] at (-1, 0) {Start:};
+  \foreach \i/\c in {1/l, 2/o, 3/w, 4/e, 5/r, 6/ , 7/l, 8/o,
+    9/w, 10/e, 11/s, 12/t} {
+    \node[tok=bitgray] at ({\i*0.55+0.5}, 0) {\c};
+  }
+  \node[steplbl, gray] at (8, 0) {(256 tokens)};
+
+  % Step 1
+  \node[steplbl, font=\scriptsize\sffamily\bfseries] at (-1, -1)
+    {Merge 1:};
+  \node[steplbl, bitorange] at (-1, -1.5) {``l''+``o'' $\to$ ``lo''};
+  \foreach \i/\c/\col in {1/lo/bitorange, 2/w/bitgray, 3/e/bitgray,
+    4/r/bitgray, 5/ /bitgray, 6/lo/bitorange, 7/w/bitgray,
+    8/e/bitgray, 9/s/bitgray, 10/t/bitgray} {
+    \node[tok=\col] at ({\i*0.6+0.5}, -1) {\c};
+  }
+  \node[steplbl, gray] at (8, -1) {(257 tokens)};
+
+  % Step 2
+  \node[steplbl, font=\scriptsize\sffamily\bfseries] at (-1, -2.5)
+    {Merge 2:};
+  \node[steplbl, bitblue] at (-1, -3) {``lo''+``w'' $\to$ ``low''};
+  \foreach \i/\c/\col in {1/low/bitblue, 2/e/bitgray,
+    3/r/bitgray, 4/ /bitgray, 5/low/bitblue,
+    6/e/bitgray, 7/s/bitgray, 8/t/bitgray} {
+    \node[tok=\col] at ({\i*0.7+0.5}, -2.5) {\c};
+  }
+  \node[steplbl, gray] at (8, -2.5) {(258 tokens)};
+
+  % Step 3
+  \node[steplbl, font=\scriptsize\sffamily\bfseries] at (-1, -4)
+    {Merge 3:};
+  \node[steplbl, bitgreen] at (-1, -4.5)
+    {``low''+``e'' $\to$ ``lowe''};
+  \foreach \i/\c/\col in {1/lowe/bitgreen,
+    2/r/bitgray, 3/ /bitgray, 4/lowe/bitgreen,
+    5/s/bitgray, 6/t/bitgray} {
+    \node[tok=\col] at ({\i*0.8+0.5}, -4) {\c};
+  }
+  \node[steplbl, gray] at (8, -4) {(259 tokens)};
+
+  % Step 4
+  \node[steplbl, font=\scriptsize\sffamily\bfseries] at (-1, -5.5)
+    {Merge 4:};
+  \node[steplbl, bitpurple] at (-1, -6)
+    {``lowe''+``r'' $\to$ ``lower''};
+  \foreach \i/\c/\col in {1/lower/bitpurple,
+    2/ /bitgray, 3/lowe/bitgreen,
+    4/s/bitgray, 5/t/bitgray} {
+    \node[tok=\col] at ({\i*0.9+0.8}, -5.5) {\c};
+  }
+  \node[steplbl, gray] at (8, -5.5) {(260 tokens)};
+
+  % Annotation
+  \draw[decorate, decoration={brace, amplitude=4pt},
+    thick, bitgray]
+    (10.5, 0.3) -- (10.5, -5.8);
+  \node[font=\scriptsize\sffamily, bitgray, anchor=west,
+    text width=3cm, align=left] at (10.8, -2.75)
+    {repeat until\\vocabulary has\\32{,}000 tokens};
+\end{tikzpicture}
+\caption{BPE vocabulary construction on the text ``lower lowest.''
+  Starting from individual characters, the algorithm repeatedly merges
+  the most frequent adjacent pair. After four merges, ``lower'' has
+  become a single token while ``lowest'' is still two tokens
+  (``lowe'' + ``st''). Common words get merged first; rare words stay
+  split.}
+\label{fig:bpe}
+\end{figure}
+
+The result is a fixed lookup table mapping token IDs to string
+fragments. Several properties make BPE well-suited for LLMs:
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{Efficiency:} Common words like ``the'' become single
+    tokens, so typical English text is compressed to about one token
+    per 3--4 characters. This means fewer tokens to process, saving
+    computation.
+  \item \textbf{Completeness:} Any text can be encoded---even
+    misspellings, code, URLs, or languages unseen during vocabulary
+    construction---because the byte-level fallback always works.
+  \item \textbf{Frequency-adaptive:} Frequent sequences get short
+    encodings (single tokens); rare sequences get longer encodings
+    (multiple tokens). This is essentially Huffman coding applied to
+    text fragments.
+\end{itemize}
+
+\begin{engineernote}
+The vocabulary is constructed \emph{once} before training begins and
+never changes. This means vocabulary design decisions---vocabulary
+size, training corpus, algorithm---are locked in permanently. A poor
+vocabulary choice cannot be fixed by training longer. This is why
+modern models use large vocabularies (100{,}000+ tokens): the extra
+embedding parameters are cheap compared to the cost of representing
+common words as multiple tokens throughout all transformer layers.
+\end{engineernote}
+
 % ----------------------------------------------------------------------------
 \subsection{Embeddings: Words as Points in Space}
 \label{sec:embeddings}
@@ -204,11 +340,55 @@ table alone uses $50{,}000 \times 4{,}096 \times 2 = 400$\,MB
 (in 16-bit precision).
 \end{engineernote}
 
-The embedding is not fixed forever. The embedding table is \emph{learned}
-during training: the model adjusts the position of every token in this
-high-dimensional space so that tokens appearing in similar contexts
-end up nearby. This learned structure is called \concept{distributional
-semantics}---the meaning of a word is defined by the company it keeps.
+But where do these embeddings come from? Unlike the vocabulary
+(which is constructed once before training), the embedding table is
+\emph{learned during training} as part of the neural network. Here
+is how:
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Initialise randomly.} At the start of training, the
+    embedding table $\bm{E} \in \mathbb{R}^{V \times d}$ is filled
+    with random numbers. Row~4521 (``cat'') is a random vector,
+    row~7803 (``dog'') is a different random vector. At this point,
+    ``cat'' and ``dog'' are no more similar than ``cat'' and
+    ``bicycle.''
+
+  \item \textbf{Forward pass.} A token enters the model. The
+    network looks up its row in $\bm{E}$, passes that vector through
+    all transformer blocks, and produces a prediction for the next
+    token.
+
+  \item \textbf{Compute error.} The prediction is compared to the
+    actual next token. The difference is the error (loss).
+
+  \item \textbf{Backpropagation.} The error is propagated backwards
+    through the entire network. Crucially, this includes the
+    embedding table: the gradient tells the model \emph{how to adjust
+    the embedding vector} of each token that appeared in the input to
+    reduce the error.
+
+  \item \textbf{Repeat billions of times.} Over billions of training
+    examples, tokens that appear in similar contexts (``The \rule{1cm}{0.15mm}
+    sat on the mat,'' ``I fed the \rule{1cm}{0.15mm}'') get their
+    embedding vectors pushed in similar directions. Gradually, ``cat''
+    and ``dog'' drift towards each other in the embedding space, while
+    ``cat'' and ``bicycle'' drift apart.
+\end{enumerate}
+
+The resulting structure is called \concept{distributional
+semantics}---the meaning of a word is defined by the company it
+keeps. Nobody told the model that ``cat'' and ``dog'' are both
+animals; it discovered this from their overlapping usage patterns.
+
+\begin{engineernote}
+The embedding table is a \emph{learned parameter} of the model, just
+like the weight matrices $\bm{W}_Q$, $\bm{W}_K$, $\bm{W}_V$ in
+self-attention or $\bm{W}_1$, $\bm{W}_2$ in the MLP. The difference
+is that the embedding lookup is not a matrix multiplication---it is a
+simple table read (select row $i$). This makes it the one operation
+in the entire model that is already ``bitwise-friendly'': no
+floating-point arithmetic, just a memory access.
+\end{engineernote}
 
 \subsubsection{Why High Dimensions Matter}
 
@@ -225,6 +405,49 @@ This is the first point of tension with bitwise approaches:
 ``happy'' and ``joyful'' is a small vector in this space; booleanising
 it (rounding each dimension to 0 or~1) would destroy these fine
 distinctions.
+
+\subsubsection{But What About Subword Pieces?}
+
+If embeddings represent meaning, and the vocabulary consists of
+subword fragments, a natural question arises: how can a word like
+``prince''---split by BPE into ``prin'' + ``ce''---end up with a
+meaningful representation? Neither ``prin'' nor ``ce'' means
+``prince'' on its own.
+
+The answer is that the embedding table only provides the
+\emph{raw materials}. The transformer layers that follow are what
+\emph{compose} meaning from fragments:
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Embedding lookup.} The tokens ``prin'' and ``ce''
+    each get their own vector from the embedding table. At the start
+    of training, these are random; after training, they carry partial
+    information (``prin'' appears in ``prince,'' ``print,''
+    ``principal''---its embedding encodes what these contexts share).
+
+  \item \textbf{Self-attention assembles the word.} In the first
+    transformer layer, ``prin'' attends to ``ce'' and vice versa.
+    The model has learned from billions of examples that these two
+    tokens together form a concept. Their representations are updated
+    to incorporate each other's information.
+
+  \item \textbf{Deeper layers build full meaning.} After a few
+    layers, the vector that started as ``prin'' effectively represents
+    ``prince''---it has absorbed the context from ``ce'' through
+    attention. By the deeper layers, the representations are no longer
+    about subword pieces at all; they represent the \emph{contextual
+    meaning} of the full word in its sentence.
+\end{enumerate}
+
+\begin{keyinsight}
+The model does not distinguish between ``assembling a word from
+subword pieces'' and ``assembling a sentence from words.'' Both are
+solved by the same self-attention mechanism. This is why LLMs handle
+misspellings, novel words, and even code so gracefully: ``princ'' +
+``ess'' works the same way as ``prin'' + ``ce.'' The pieces carry
+partial information, and attention composes them into meaning---layer
+by layer, from fragments to words to phrases to full understanding.
+\end{keyinsight}
 
 % ----------------------------------------------------------------------------
 \subsection{The Transformer Block: The Engine of Modern AI}
@@ -338,9 +561,11 @@ Let us examine each component in detail.
 % ----------------------------------------------------------------------------
 
 Self-attention is the mechanism that lets each token in a sequence
-attend to every other token. It answers the question: \emph{``For each
-word I am processing, which other words in the sequence should
-influence my understanding of it?''}
+\emph{attend to} every other token. But what does ``attend to''
+actually mean in practice? It means: \textbf{compute a relevance score
+against every other token, then blend their information proportionally.}
+The result is a new representation of the token that now \emph{contains}
+information from the tokens it found relevant.
 
 \subsubsection{The Intuition}
 
@@ -353,18 +578,90 @@ Self-attention lets the token ``it'' \emph{look at every other token}
 and assign each one a relevance score. It assigns high relevance to
 ``street'' and low relevance to ``animal,'' then uses these scores to
 blend information from the relevant tokens into its own representation.
+Concretely, this is what happens for a single token:
+
+\begin{enumerate}[leftmargin=2em]
+  \item The token produces a \emph{query} vector---a question:
+    ``what kind of context do I need?''
+  \item Every token (including itself) produces a \emph{key}
+    vector---a label: ``here is what I contain.''
+  \item The query is dot-producted with every key, giving a raw
+    similarity score per token. High dot product = ``this token is
+    relevant to me.''
+  \item The scores are normalised via softmax so they sum to~1
+    (now they are weights, e.g.\ 0.02, 0.71, 0.05, \ldots).
+  \item Every token also produces a \emph{value} vector---the actual
+    information it offers if selected.
+  \item The value vectors are combined as a weighted sum using the
+    attention weights. So ``it'' gets 71\% of ``cat'''s
+    information, 19\% of its own, 2\% of ``The,'' and so on.
+\end{enumerate}
+
+This happens \emph{for every token simultaneously}---every token
+queries every other token in parallel, producing an $n \times n$
+attention matrix. That is why it is called \emph{self}-attention (the
+sequence attends to itself) and why it costs $O(n^2)$ in sequence
+length.
+
+\begin{keyinsight}
+The number of tokens that self-attention can look at is exactly what
+defines a model's \concept{context window}. In standard self-attention,
+every token attends to \emph{every other token} in the
+sequence---there is no built-in limit on how far back it looks. The
+only constraint is how many tokens the model was trained to handle
+at once.
+
+This is why the context window has become one of the most important
+model parameters: a longer context means self-attention can draw on
+more information, but the $O(n^2)$ cost grows rapidly.
+Early transformers were limited to 512 or 2{,}048 tokens.
+Modern LLMs have pushed this dramatically:
+Llama~3 supports up to 128K tokens, GPT-4 handles 128K, and
+Claude operates with up to 1{,}000{,}000 tokens---requiring
+significant engineering to manage the quadratic attention cost at
+that scale (techniques like sparse attention, sliding windows, and
+efficient memory management).
+
+Some architectures deliberately limit the look-back to a fixed
+window (e.g.\ Mistral uses a 4{,}096-token sliding window per
+layer) to reduce cost, relying on information propagating across layers to
+effectively extend the range. But the standard mechanism attends to
+the full context.
+\end{keyinsight}
 
 \subsubsection{The Mechanism: Queries, Keys, and Values}
 
-Self-attention works through three learned projections. For each token,
-the model computes:
+Self-attention works through three learned projections. Each token's
+embedding vector $\bm{x} \in \mathbb{R}^d$ is multiplied by three
+different weight matrices to produce three different vectors:
 
 \begin{itemize}[leftmargin=2em]
-  \item A \concept{query} ($\bm{q}$): ``What am I looking for?''
-  \item A \concept{key} ($\bm{k}$): ``What do I contain?''
-  \item A \concept{value} ($\bm{v}$): ``What information do I
+  \item A \concept{query} ($\bm{q} = \bm{x}\bm{W}_Q$): ``What am I looking for?''
+  \item A \concept{key} ($\bm{k} = \bm{x}\bm{W}_K$): ``What do I contain?''
+  \item A \concept{value} ($\bm{v} = \bm{x}\bm{W}_V$): ``What information do I
     provide if selected?''
 \end{itemize}
+
+All three come from the \emph{same} embedding vector---but the learned
+weight matrices $\bm{W}_Q$, $\bm{W}_K$, $\bm{W}_V$ project it into
+different subspaces, each serving a different role. The key--value
+split is essential: the key determines \emph{whether} a token is
+relevant (used for scoring), while the value determines \emph{what
+information} gets passed along (used for blending). They are
+deliberately decoupled so the network can learn to match on one
+feature (e.g.\ grammatical role) but transmit another (e.g.\ semantic
+content).
+
+\begin{engineernote}
+Why does the dot product measure similarity? Two vectors pointing in
+the same direction have a large positive dot product; perpendicular
+vectors have a dot product of zero; opposing vectors are negative.
+So $\bm{q} \cdot \bm{k} = \sum_i q_i k_i$ is large when query and
+key ``agree'' across many dimensions---exactly the property we need
+for a relevance score. Training adjusts the projection matrices so
+that tokens that should attend to each other end up with aligned
+query and key vectors.
+\end{engineernote}
 
 \begin{figure}[htbp]
 \centering
@@ -464,7 +761,10 @@ Let us unpack each step:
 
   \item \textbf{Aggregate.} Multiply the attention weights by the
     value matrix. Each token's output is a weighted average of all
-    tokens' values, where the weights reflect relevance.
+    tokens' values, where the weights reflect relevance. The result
+    is a matrix $\in \mathbb{R}^{n \times d_k}$---one new vector per
+    token, same shape as the input, but now enriched with contextual
+    information from the tokens each one attended to.
 \end{enumerate}
 
 \begin{keyinsight}
@@ -484,20 +784,210 @@ see \cref{sec:bitnet-reality}). The softmax is where
 floating-point computation concentrates.
 \end{keyinsight}
 
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth]
+  % --- Left: raw scores (bar chart) ---
+  \node[font=\small\sffamily\bfseries] at (2, 4.5)
+    {Raw scores (logits)};
+
+  \foreach \i/\v/\lbl in {
+    1/2.0/2.0, 2/1.0/1.0, 3/0.1/0.1, 4/-1.0/{-1.0}, 5/-3.5/{-3.5}} {
+    \fill[bitblue!40] ({\i*0.7-0.1}, 0) rectangle ({\i*0.7+0.4}, {\v/2+2});
+    \node[font=\tiny\sffamily] at ({\i*0.7+0.15}, {\v/2+2+0.3}) {\lbl};
+  }
+  \draw[->] (0.3, 0) -- (4.2, 0);
+  \draw[->] (0.5, -0.2) -- (0.5, 4);
+  % zero line
+  \draw[gray, dashed, thin] (0.5, 2) -- (4.0, 2);
+  \node[font=\tiny\sffamily, gray] at (0.2, 2) {0};
+
+  % --- Arrow ---
+  \draw[->, very thick, bitgray] (4.8, 2) -- (6.8, 2);
+  \node[font=\scriptsize\sffamily, above=2pt] at (5.8, 2)
+    {softmax};
+
+  % --- Right: probabilities (bar chart) ---
+  \node[font=\small\sffamily\bfseries] at (10, 4.5)
+    {Probabilities (sum = 1)};
+
+  % softmax([2.0, 1.0, 0.1, -1.0, -3.5]) ≈ [0.588, 0.216, 0.088, 0.029, 0.002]
+  \foreach \i/\v/\lbl in {
+    1/0.588/0.59, 2/0.216/0.22, 3/0.088/0.09,
+    4/0.029/0.03, 5/0.002/{\ensuremath{<}0.01}} {
+    \fill[bitorange!60] ({7+\i*0.7-0.1}, 0)
+      rectangle ({7+\i*0.7+0.4}, {\v*6});
+    \node[font=\tiny\sffamily] at ({7+\i*0.7+0.15}, {\v*6+0.3})
+      {\lbl};
+  }
+  \draw[->] (7.3, 0) -- (11.5, 0);
+  \draw[->] (7.5, -0.2) -- (7.5, 4);
+  \node[font=\tiny\sffamily, gray, anchor=east] at (7.45, 0) {0};
+  \node[font=\tiny\sffamily, gray, anchor=east] at (7.45, 3) {0.5};
+  \draw[gray, dashed, thin] (7.5, 3) -- (11.3, 3);
+
+  % Labels under bars
+  \foreach \i/\lbl in {1/$z_1$, 2/$z_2$, 3/$z_3$, 4/$z_4$, 5/$z_5$} {
+    \node[font=\tiny\sffamily] at ({\i*0.7+0.15}, -0.3) {\lbl};
+    \node[font=\tiny\sffamily] at ({7+\i*0.7+0.15}, -0.3) {\lbl};
+  }
+\end{tikzpicture}
+\caption{The softmax function in action. Left: raw scores can be any
+  real number, including negative values. Right: after softmax, all
+  values are positive and sum to~1. Notice how the largest input
+  ($z_1 = 2.0$) dominates the output (59\%), while differences are
+  amplified---the negative scores are nearly zeroed out. The
+  exponentiation $e^{z_i}$ is what creates this winner-take-more
+  effect.}
+\label{fig:softmax}
+\end{figure}
+
+To see how softmax behaves continuously, consider a three-element
+vector $[x,\; 1,\; 0]$ where we vary $x$ from $-4$ to $+4$.
+\Cref{fig:softmax-curves} shows how the probability assigned to each
+element shifts as $x$ changes: when $x$ is large, it dominates; when
+$x$ is small, the other elements share the probability mass.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+  \begin{axis}[
+    width=12cm, height=6.5cm,
+    xmin=-4, xmax=4, ymin=0, ymax=1.05,
+    axis lines=left,
+    xlabel={$x$},
+    ylabel={softmax probability},
+    xlabel style={font=\small\sffamily},
+    ylabel style={font=\small\sffamily},
+    legend style={at={(0.98, 0.98)}, anchor=north east,
+      font=\scriptsize\sffamily, draw=none, fill=white,
+      fill opacity=0.85, text opacity=1},
+    grid=major, grid style={gray!20},
+    tick label style={font=\tiny},
+    every axis plot/.append style={thick, samples=100, smooth},
+    ytick={0, 0.2, 0.4, 0.6, 0.8, 1.0}
+  ]
+    % softmax([x, 1, 0]) for element x:
+    % p(x) = e^x / (e^x + e^1 + e^0) = e^x / (e^x + e + 1)
+    \addplot[bitblue, domain=-4:4]
+      {exp(x) / (exp(x) + exp(1) + 1)};
+    \addlegendentry{$P(z_1)$: element being varied ($z_1 = x$)}
+
+    % p(z2=1) = e^1 / (e^x + e^1 + 1)
+    \addplot[bitorange, domain=-4:4]
+      {exp(1) / (exp(x) + exp(1) + 1)};
+    \addlegendentry{$P(z_2)$: fixed element ($z_2 = 1$)}
+
+    % p(z3=0) = 1 / (e^x + e^1 + 1)
+    \addplot[bitgreen, domain=-4:4]
+      {1 / (exp(x) + exp(1) + 1)};
+    \addlegendentry{$P(z_3)$: fixed element ($z_3 = 0$)}
+
+    % Reference line: equal probability
+    \addplot[gray, dashed, thin, domain=-4:4, forget plot] {1/3};
+    \node[font=\scriptsize\sffamily, gray, anchor=west]
+      at (axis cs:2.5, 0.38)
+      {$\frac{1}{3}$ (equal share)};
+  \end{axis}
+\end{tikzpicture}
+\caption{Softmax output for a three-element vector $[x, 1, 0]$ as
+  $x$ varies. When $x \ll 0$, the varied element gets near-zero
+  probability and the fixed elements share the rest. When $x \gg 0$,
+  it dominates. At $x = 1$, elements $z_1$ and $z_2$ are equal and
+  $z_3$ gets less. The curves show the characteristic S-shaped
+  transition---in fact, for a two-element softmax, this reduces
+  exactly to the sigmoid function.}
+\label{fig:softmax-curves}
+\end{figure}
+
 \subsubsection{Multi-Head Attention}
 
-In practice, the model does not compute one set of queries, keys, and
-values. It computes $h$ sets in parallel (typically $h = 32$ to 128),
-each with a smaller dimension $d_k = d/h$. These are called
-\concept{attention heads}.
+A single attention head can only learn one notion of ``relevance.''
+But language has many simultaneous relationships: syntactic (subject
+agrees with verb), semantic (synonyms cluster), positional (nearby
+words matter for idioms), referential (pronouns link to antecedents).
+One head cannot capture all of these at once.
+
+The solution is \concept{multi-head attention}: instead of computing
+one set of queries, keys, and values with the full embedding dimension
+$d$, the model splits the embedding into $h$ smaller slices of
+dimension $d_k = d/h$ and runs a \emph{separate} attention
+computation on each slice, in parallel. Each slice is called an
+\concept{attention head}.
+
+Concretely, for an embedding of $d = 512$ and $h = 8$ heads:
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Split.} Each token's $d$-dimensional embedding is
+    projected into $h = 8$ separate query/key/value triples, each of
+    dimension $d_k = 64$.
+  \item \textbf{Attend independently.} Each head runs the full
+    self-attention mechanism (score, scale, softmax, aggregate) on
+    its own 64-dimensional slice. Head~1 might learn to track
+    subject--verb agreement; Head~2 might track coreference
+    (``it'' $\to$ ``street''); Head~3 might attend to nearby words.
+  \item \textbf{Concatenate.} The $h$ output vectors (each 64-dim)
+    are concatenated back into a single $d$-dimensional vector.
+  \item \textbf{Project.} A final weight matrix $\bm{W}_O$ mixes
+    the concatenated heads into the final output.
+\end{enumerate}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth,
+  box/.style={draw, rounded corners=2pt, minimum height=0.7cm,
+    font=\scriptsize\sffamily, fill=#1!12, align=center},
+  arr/.style={->, thick},
+  brace/.style={decorate, decoration={brace, amplitude=5pt, mirror}}
+]
+  % Input embedding
+  \node[box=bitgray, minimum width=8cm] (input) at (4, 0)
+    {Token embedding ($d = 512$)};
+
+  % Heads
+  \foreach \i/\col in {1/bitblue, 2/bitgreen, 3/bitorange, 4/bitgray} {
+    \pgfmathsetmacro{\x}{(\i-1)*2.2 + 0.6}
+    % Split box
+    \node[box=\col, minimum width=1.6cm, text width=1.4cm]
+      (head\i) at (\x, 2)
+      {Head \i\\[-1pt]{\tiny $d_k\!=\!64$}};
+    \draw[arr] (input.north -| head\i) -- (head\i.south);
+    % Attention
+    \node[box=\col, minimum width=1.6cm, text width=1.4cm]
+      (attn\i) at (\x, 4)
+      {Self-Attn\\[-1pt]{\tiny $Q_\i K_\i V_\i$}};
+    \draw[arr] (head\i.north) -- (attn\i.south);
+  }
+
+  % Dots between head 4 and implied others
+  \node[font=\sffamily] at (8.6, 2) {\ldots};
+  \node[font=\sffamily] at (8.6, 4) {\ldots};
+
+  % Concat
+  \node[box=bitgray, minimum width=8cm] (concat) at (4, 5.8)
+    {Concatenate ($h \times d_k = 512$)};
+  \foreach \i in {1,...,4} {
+    \draw[arr] (attn\i.north) -- (concat.south -| attn\i);
+  }
+
+  % Output projection
+  \node[box=bitgray, minimum width=8cm] (output) at (4, 7.2)
+    {Output projection $\bm{W}_O$ ($d = 512$)};
+  \draw[arr] (concat.north) -- (output.south);
+\end{tikzpicture}
+\caption{Multi-head attention splits the embedding into $h$ independent
+  heads, each running self-attention on a smaller slice. The results are
+  concatenated and projected back to the original dimension. This lets
+  the model attend to different types of relationships simultaneously.}
+\label{fig:multi-head}
+\end{figure}
 
 \begin{analogy}
 Multi-head attention is like having multiple reading comprehension
-specialists. One head might focus on syntactic relationships (subject
-and verb agreement), another on semantic similarity (synonyms and
-related concepts), a third on positional relationships (nearby words).
-Each head independently decides what is relevant, and their
-conclusions are concatenated and combined.
+specialists working on the same text simultaneously. One specialist
+focuses on grammar, another on meaning, a third on word proximity.
+Each independently decides what is relevant, then they pool their
+notes into a single summary.
 \end{analogy}
 
 The output of multi-head attention is:
@@ -515,16 +1005,255 @@ where each $\text{head}_i = \text{Attention}(\bm{X}\bm{W}_Q^i,
 % ----------------------------------------------------------------------------
 
 After attention lets tokens communicate, each token is processed
-\emph{independently} through a small two-layer neural network:
+\emph{independently} through a small two-layer neural network.
+``Two-layer'' here means exactly two matrix multiplications with a
+nonlinear activation in between---it is the simplest possible neural
+network that can learn nonlinear patterns:
 
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Expand.} Multiply the token vector ($d$-dimensional)
+    by weight matrix $\bm{W}_1$ to project it into a much larger
+    hidden space ($d_{\text{ff}}$-dimensional, typically $4 \times d$).
+    Then apply a nonlinear activation function $\sigma$ (typically GELU
+    or SiLU). This expansion lets the network represent richer,
+    more complex patterns than the original $d$ dimensions allow.
+  \item \textbf{Compress.} Multiply by $\bm{W}_2$ to project back down
+    to $d$ dimensions. The output has the same shape as the input, but
+    the information has been transformed.
+\end{enumerate}
+
+In equation form:
 \begin{equation}
   \text{FFN}(\bm{x}) = \sigma(\bm{x}\bm{W}_1 + \bm{b}_1)\bm{W}_2 + \bm{b}_2
   \label{eq:ffn}
 \end{equation}
 
-where $\sigma$ is a nonlinear activation function (typically GELU or
-SiLU), $\bm{W}_1 \in \mathbb{R}^{d \times d_{\text{ff}}}$ and
+where $\sigma$ is the activation function,
+$\bm{W}_1 \in \mathbb{R}^{d \times d_{\text{ff}}}$ and
 $\bm{W}_2 \in \mathbb{R}^{d_{\text{ff}} \times d}$.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth,
+  box/.style={draw, rounded corners=2pt, minimum height=0.7cm,
+    font=\scriptsize\sffamily, fill=#1!12, align=center},
+  arr/.style={->, thick}
+]
+  % Input
+  \node[box=bitblue, minimum width=2cm] (in) at (0, 0)
+    {$\bm{x}$\\[-1pt]{\tiny $d = 512$}};
+
+  % W1
+  \node[box=bitorange, minimum width=3cm] (w1) at (3.5, 0)
+    {$\times\;\bm{W}_1$\\[-1pt]{\tiny expand to $d_{\text{ff}} = 2048$}};
+  \draw[arr] (in) -- (w1);
+
+  % Activation
+  \node[box=bitgreen, minimum width=1.5cm] (act) at (7, 0)
+    {$\sigma$ (GELU)};
+  \draw[arr] (w1) -- (act);
+
+  % W2
+  \node[box=bitorange, minimum width=3cm] (w2) at (10.5, 0)
+    {$\times\;\bm{W}_2$\\[-1pt]{\tiny compress to $d = 512$}};
+  \draw[arr] (act) -- (w2);
+
+  % Output
+  \node[box=bitblue, minimum width=2cm] (out) at (14, 0)
+    {$\bm{y}$\\[-1pt]{\tiny $d = 512$}};
+  \draw[arr] (w2) -- (out);
+
+  % Dimension annotation
+  \draw[<->, gray, thick] (3.5, -1) -- (10.5, -1);
+  \node[font=\scriptsize\sffamily, gray, below=2pt] at (7, -1)
+    {high-dimensional hidden space ($4\times$ wider)};
+\end{tikzpicture}
+\caption{The feed-forward network (MLP block): abstract pipeline view.
+  The input is expanded to a wider hidden dimension, passed
+  through a nonlinear activation, then compressed back.}
+\label{fig:ffn}
+\end{figure}
+
+What does this look like at the level of individual neurons?
+Exactly the same structure as the traditional neuron from
+\cref{fig:traditional-neuron}, but arranged in two fully connected
+layers (\cref{fig:ffn-neurons}). Each hidden neuron receives
+\emph{all} $d$ inputs, computes a weighted sum plus bias
+($\sum_i w_i x_i + b$), and applies the activation function---the
+same multiply-accumulate (MAC) operation from
+\cref{sec:traditional-neuron}.
+The second layer does the same in reverse: each output neuron
+receives all $d_{\text{ff}}$ hidden activations and produces one
+component of the output vector. Every arrow in the diagram
+represents one learned weight---and with $d = 512$ and
+$d_{\text{ff}} = 2{,}048$, the first layer alone has
+$512 \times 2{,}048 = 1{,}048{,}576$ weights.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth,
+  neuron/.style={draw, circle, minimum size=0.45cm,
+    inner sep=0pt, font=\tiny\sffamily, fill=#1!15},
+  arr/.style={-, thin, opacity=0.25},
+  lbl/.style={font=\scriptsize\sffamily}
+]
+  % --- Input layer (d = 512, show 5) ---
+  \foreach \i in {1,...,5} {
+    \node[neuron=bitblue] (in\i) at (0, {-\i*0.8 + 0.4}) {};
+  }
+  \node[lbl, rotate=90, anchor=south] at (-0.7, -2)
+    {Input ($d = 512$)};
+  % dots
+  \node[font=\small] at (0, -4.6) {$\vdots$};
+  \node[neuron=bitblue] (in6) at (0, -5.2) {};
+
+  % --- Hidden layer (d_ff = 2048, show 8) ---
+  \foreach \i in {1,...,8} {
+    \node[neuron=bitorange] (h\i) at (4.5, {-\i*0.65 + 0.65}) {};
+  }
+  \node[lbl, rotate=90, anchor=south] at (3.6, -2.5)
+    {Hidden ($d_{\text{ff}} = 2048$)};
+  \node[font=\small] at (4.5, -5.3) {$\vdots$};
+  \node[neuron=bitorange] (h9) at (4.5, -5.9) {};
+
+  % --- Output layer (d = 512, show 5) ---
+  \foreach \i in {1,...,5} {
+    \node[neuron=bitblue] (out\i) at (9, {-\i*0.8 + 0.4}) {};
+  }
+  \node[lbl, rotate=90, anchor=south] at (9.7, -2)
+    {Output ($d = 512$)};
+  \node[font=\small] at (9, -4.6) {$\vdots$};
+  \node[neuron=bitblue] (out6) at (9, -5.2) {};
+
+  % --- Connections: input -> hidden (sample) ---
+  \foreach \i in {1,...,5,6} {
+    \foreach \j in {1,...,8,9} {
+      \draw[arr, bitorange] (in\i) -- (h\j);
+    }
+  }
+
+  % --- Connections: hidden -> output (sample) ---
+  \foreach \i in {1,...,8,9} {
+    \foreach \j in {1,...,5,6} {
+      \draw[arr, bitblue] (h\i) -- (out\j);
+    }
+  }
+
+  % --- Labels ---
+  \node[lbl, bitorange, align=center] at (2.25, 1.2)
+    {$\bm{W}_1$: each arrow\\is one weight};
+  \node[lbl, bitblue, align=center] at (6.75, 1.2)
+    {$\bm{W}_2$: each arrow\\is one weight};
+
+  % Activation annotation
+  \draw[thick, bitgreen, decorate,
+    decoration={brace, amplitude=4pt, mirror}]
+    (5.2, 0.4) -- (5.2, -6.2);
+  \node[lbl, bitgreen, anchor=west, text width=2.5cm] at (5.4, -2.9)
+    {each neuron\\applies $\sigma$\\(GELU)};
+
+  % Single neuron callout
+  \draw[thick, dashed, bitgray] (3.8, -0.5) rectangle (5.2, 0.2);
+  \node[lbl, bitgray, anchor=west] at (5.3, -0.15)
+    {one neuron = Fig.~5};
+\end{tikzpicture}
+\caption{The same MLP block as \cref{fig:ffn}, drawn at the neuron
+  level (cf.~\cref{fig:traditional-neuron}). Every circle is one
+  neuron performing a weighted sum + activation. Every line is one
+  learned weight. The input layer connects fully to a wider hidden
+  layer ($\bm{W}_1$), each hidden neuron applies the activation
+  function, then the hidden layer connects fully back to the output
+  ($\bm{W}_2$). Only a fraction of the neurons and connections are
+  shown; the real network has over one million weights in $\bm{W}_1$
+  alone.}
+\label{fig:ffn-neurons}
+\end{figure}
+
+The activation function $\sigma$ introduces the nonlinearity that
+makes the network more than just a matrix multiplication. Without it,
+stacking two linear layers ($\bm{W}_1$ then $\bm{W}_2$) would
+collapse into a single linear transformation---the hidden layer would
+be pointless. Modern transformers use GELU or SiLU rather than the
+older ReLU, because their smooth curves give better gradient flow
+during training.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+  \begin{axis}[
+    width=12cm, height=6cm,
+    xmin=-4, xmax=4, ymin=-1.5, ymax=4,
+    axis lines=middle,
+    xlabel={$x$}, ylabel={$\sigma(x)$},
+    xlabel style={at=(current axis.right of origin), anchor=west,
+      font=\small\sffamily},
+    ylabel style={at=(current axis.above origin), anchor=south,
+      font=\small\sffamily},
+    legend style={at={(0.02, 0.98)}, anchor=north west,
+      font=\scriptsize\sffamily, draw=none, fill=white, fill opacity=0.8,
+      text opacity=1},
+    grid=major, grid style={gray!20},
+    tick label style={font=\tiny},
+    every axis plot/.append style={thick, samples=100, smooth}
+  ]
+    % ReLU (two segments to get the kink)
+    \addplot[bitgray, dashed, domain=-4:0, forget plot] {0};
+    \addplot[bitgray, dashed, domain=0:4] {x};
+    \addlegendentry{ReLU: $\max(0, x)$}
+
+    % GELU (sigmoid approximation: x * sigmoid(1.702x))
+    \addplot[bitblue, domain=-4:4]
+      {x / (1 + exp(-1.702*x))};
+    \addlegendentry{GELU: $x \cdot \Phi(x)$}
+
+    % SiLU / Swish
+    \addplot[bitorange, domain=-4:4]
+      {x / (1 + exp(-x))};
+    \addlegendentry{SiLU: $x \cdot \text{sigmoid}(x)$}
+  \end{axis}
+\end{tikzpicture}
+\caption{Activation functions used in modern transformers. ReLU
+  (dashed, for reference) has a hard kink at zero. GELU and SiLU are
+  smooth approximations that allow small negative values through,
+  giving better gradient flow. Both are close to linear for positive
+  inputs and smoothly suppress negative inputs. The key point for
+  binarisation: all three require floating-point arithmetic---they
+  cannot be computed with pure bitwise operations.}
+\label{fig:activations}
+\end{figure}
+
+The mathematical definitions are:
+
+\begin{align}
+  \text{ReLU}(x) &= \max(0,\, x)
+  \label{eq:relu}\\[6pt]
+  \text{sigmoid}(x) &= \frac{1}{1 + e^{-x}}
+  \label{eq:sigmoid}\\[6pt]
+  \text{SiLU}(x) &= x \cdot \text{sigmoid}(x)
+    = \frac{x}{1 + e^{-x}}
+  \label{eq:silu}\\[6pt]
+  \text{GELU}(x) &= x \cdot \Phi(x)
+  \label{eq:gelu}
+\end{align}
+
+where $\Phi(x)$ is the cumulative distribution function of the
+standard normal distribution---i.e.\ the probability that a random
+variable drawn from a Gaussian with mean~0 and variance~1 falls
+below $x$:
+\begin{equation}
+  \Phi(x) = \frac{1}{2}\left[1 + \text{erf}\!\left(\frac{x}{\sqrt{2}}\right)\right]
+  = \int_{-\infty}^{x} \frac{1}{\sqrt{2\pi}}\, e^{-t^2/2}\, dt
+  \label{eq:phi}
+\end{equation}
+
+In practice, $\Phi(x)$ is approximated as
+$\text{sigmoid}(1.702\, x)$, which avoids evaluating the error
+function. This makes GELU and SiLU nearly identical in form---both
+multiply $x$ by a sigmoid-like gate that smoothly transitions from~0
+(for large negative $x$) to~1 (for large positive $x$). The
+difference is only in the sigmoid's steepness: SiLU uses
+$\text{sigmoid}(x)$ while GELU uses the slightly steeper
+$\text{sigmoid}(1.702\, x)$.
 
 The inner dimension $d_{\text{ff}}$ is typically $4 \times d$. For a
 model with $d = 4{,}096$, this means $\bm{W}_1$ has $4{,}096 \times
@@ -556,17 +1285,80 @@ deep transformers trainable.
 
 \subsubsection{Residual Connections}
 
-A residual connection simply adds the input of a sub-layer back to
-its output:
+In transformer terminology, a \emph{sub-layer} is one of the two
+components inside a single transformer block: either the self-attention
+or the MLP (see \cref{fig:transformer-block}). A residual connection
+wraps \emph{each} sub-layer individually---the input skips past that
+one sub-layer and is added back to its output:
 \begin{equation}
   \bm{y} = \bm{x} + \text{SubLayer}(\bm{x})
   \label{eq:residual}
 \end{equation}
 
-This means the sub-layer only needs to learn the \emph{difference}
-from the input, not the entire transformation. Without residual
-connections, gradients vanish in deep networks---a 96-layer
-transformer would be untrainable.
+So in each transformer block there are \emph{two} residual
+connections: one around self-attention, one around the MLP. The skip
+does not bypass the entire block or multiple layers---just one
+sub-layer at a time. This means each sub-layer only needs to learn a
+small \emph{correction} to its input, not the entire transformation.
+
+Why does this matter for deep networks? A model like Llama~3 stacks
+96 of these blocks, giving 192 sub-layers in total. Without residual
+connections, the gradient signal would have to survive 192
+back-to-back matrix multiplications during backpropagation---it would
+shrink to effectively zero (the \emph{vanishing gradient} problem).
+The skip connections provide a direct path for gradients to flow from
+the output all the way back to the input, keeping training stable.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth,
+  box/.style={draw, rounded corners=2pt, minimum height=0.8cm,
+    minimum width=2.8cm, font=\scriptsize\sffamily, fill=#1!12,
+    align=center},
+  arr/.style={->, thick},
+  lbl/.style={font=\scriptsize\sffamily, bitgray}
+]
+  % --- Without residual (left) ---
+  \node[font=\small\sffamily\bfseries] at (1.4, 5.5) {Without residual};
+
+  \node[box=bitblue] (in1) at (1.4, 0) {$\bm{x}$};
+  \node[box=bitorange] (sub1) at (1.4, 2) {SubLayer};
+  \node[box=bitblue] (out1) at (1.4, 4) {$\bm{y} = f(\bm{x})$};
+
+  \draw[arr] (in1) -- (sub1);
+  \draw[arr] (sub1) -- (out1);
+
+  \node[lbl, text width=2.5cm, align=center] at (1.4, -1)
+    {must learn the\\entire output};
+
+  % --- With residual (right) ---
+  \node[font=\small\sffamily\bfseries] at (7.5, 5.5) {With residual};
+
+  \node[box=bitblue] (in2) at (7.5, 0) {$\bm{x}$};
+  \node[box=bitorange] (sub2) at (7.5, 2) {SubLayer};
+  \node[draw, circle, inner sep=1pt, font=\scriptsize\sffamily,
+    fill=bitgreen!15] (plus) at (7.5, 3.5) {$+$};
+  \node[box=bitblue] (out2) at (7.5, 4.8) {$\bm{y} = \bm{x} + f(\bm{x})$};
+
+  \draw[arr] (in2) -- (sub2);
+  \draw[arr] (sub2) -- (plus);
+  \draw[arr] (plus) -- (out2);
+
+  % Skip connection
+  \draw[arr, bitgreen, thick] (in2.east) -- ++(1.5, 0) |- (plus.east);
+  \node[lbl, bitgreen, rotate=90, anchor=south] at (9.3, 1.75)
+    {skip connection};
+
+  \node[lbl, text width=2.5cm, align=center] at (7.5, -1)
+    {only learns the\\small \emph{difference}};
+\end{tikzpicture}
+\caption{Residual connections. Without the skip connection (left), the
+  sub-layer must learn the complete output. With the skip connection
+  (right), the input passes straight through and the sub-layer only
+  needs to learn a small correction. This keeps gradients healthy
+  even through 96+ stacked layers.}
+\label{fig:residual}
+\end{figure}
 
 \subsubsection{Layer Normalisation}
 
@@ -678,7 +1470,119 @@ vocabulary:
 where $\bm{h}_n$ is the hidden state of the last token after the
 final transformer block, and $\bm{W}_{\text{vocab}} \in
 \mathbb{R}^{d \times V}$ projects it into a score for each vocabulary
-item.
+item. Let us unpack what this means step by step, because this is
+where all the abstract vectors finally become concrete text.
+
+\subsubsection{From Vector to Word: The Output Head}
+
+After passing through all transformer blocks, the model has a single
+$d$-dimensional vector $\bm{h}_n$ for the last token in the
+sequence. This vector encodes everything the model ``knows'' about
+what should come next. But it is still just a list of, say, 4{,}096
+floating-point numbers---not a word. How do we get from here to an
+actual token?
+
+\begin{enumerate}[leftmargin=2em]
+  \item \textbf{Final layer norm.} The vector is normalised one last
+    time to stabilise its scale.
+
+  \item \textbf{Vocabulary projection.} The normalised vector
+    $\bm{h}_n \in \mathbb{R}^d$ is multiplied by the
+    \concept{output weight matrix} $\bm{W}_{\text{vocab}} \in
+    \mathbb{R}^{d \times V}$, where $V$ is the vocabulary size
+    (e.g.\ 32{,}000 for Llama, 100{,}000+ for GPT-4). This single
+    matrix multiplication produces one raw score (called a
+    \emph{logit}) for every token in the vocabulary:
+    \[
+      \text{logits} = \bm{h}_n \, \bm{W}_{\text{vocab}}
+      \in \mathbb{R}^V
+    \]
+    Each column of $\bm{W}_{\text{vocab}}$ is essentially a
+    $d$-dimensional ``template'' for one vocabulary token. The dot
+    product $\bm{h}_n \cdot \bm{w}_{\text{token}}$ measures how
+    well the model's hidden state matches that token's
+    template---exactly the same dot-product-as-similarity idea from
+    self-attention (\cref{sec:self-attention}).
+
+  \item \textbf{Softmax.} The $V$ logits are passed through
+    softmax to produce a probability distribution. For a vocabulary
+    of 32{,}000 tokens, this gives 32{,}000 probabilities that sum
+    to~1. The token ``cat'' might get probability 0.12, ``dog'' might
+    get 0.08, and most tokens get near-zero probability.
+
+  \item \textbf{Sample or pick.} A token is selected from this
+    distribution. The simplest strategy is \emph{greedy decoding}:
+    always pick the highest-probability token. In practice, models
+    use \emph{sampling with temperature} to introduce controlled
+    randomness, which produces more natural and varied text.
+\end{enumerate}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth,
+  box/.style={draw, rounded corners=2pt, minimum height=0.7cm,
+    font=\scriptsize\sffamily, fill=#1!12, align=center},
+  arr/.style={->, thick}
+]
+  % Hidden state
+  \node[box=bitblue, minimum width=2.5cm] (h) at (0, 0)
+    {$\bm{h}_n$\\[-1pt]{\tiny $d = 4096$}};
+
+  % W_vocab multiply
+  \node[box=bitorange, minimum width=3.5cm] (w) at (4.5, 0)
+    {$\times\;\bm{W}_{\text{vocab}}$\\[-1pt]
+     {\tiny $d \times V = 4096 \times 32000$}};
+  \draw[arr] (h) -- (w);
+
+  % Logits
+  \node[box=bitgray, minimum width=2.5cm] (logits) at (9, 0)
+    {logits\\[-1pt]{\tiny $V = 32000$ scores}};
+  \draw[arr] (w) -- (logits);
+
+  % Softmax
+  \node[box=bitgreen, minimum width=2cm] (soft) at (12.5, 0)
+    {softmax};
+  \draw[arr] (logits) -- (soft);
+
+  % Probabilities below
+  \node[box=bitorange, minimum width=2.5cm] (probs) at (12.5, -1.8)
+    {probabilities\\[-1pt]{\tiny 32000 values, sum = 1}};
+  \draw[arr] (soft) -- (probs);
+
+  % Example tokens
+  \node[font=\tiny\sffamily, anchor=west, text width=4cm] at (9, -1.8)
+    {``cat'' $\to$ 0.12\\
+     ``dog'' $\to$ 0.08\\
+     ``the'' $\to$ 0.05\\
+     ``sat'' $\to$ 0.04\\
+     \ldots\\[-2pt]
+     32{,}000 entries};
+
+  % Selected token
+  \node[box=bitblue, minimum width=2cm] (token) at (12.5, -3.5)
+    {``cat''\\[-1pt]{\tiny selected token}};
+  \draw[arr] (probs) -- (token);
+  \node[font=\tiny\sffamily, bitgray, anchor=west] at (13.7, -2.65)
+    {sample};
+\end{tikzpicture}
+\caption{The output head: from hidden state to predicted token. The
+  $d$-dimensional vector is projected to $V$ vocabulary scores (one
+  per possible token), softmax converts these to probabilities, and a
+  token is selected. The matrix $\bm{W}_{\text{vocab}}$ alone has
+  $d \times V \approx 131$~million parameters.}
+\label{fig:output-head}
+\end{figure}
+
+\begin{engineernote}
+The vocabulary is not a dictionary of English words. It is a set of
+\emph{subword tokens} learned from data by algorithms like BPE
+(Byte-Pair Encoding). Common words like ``the'' are single tokens;
+rarer words are split into pieces (``unforgettable'' $\to$ ``un'' +
+``forget'' + ``table''). This is why LLMs can handle any text,
+including code, URLs, and languages they were not primarily trained
+on---the vocabulary covers all possible byte sequences, just at
+different granularities.
+\end{engineernote}
 
 \begin{keyinsight}
 Autoregressive generation means the model's speed is determined by
@@ -914,30 +1818,70 @@ examine every patient.
 Now that we understand the full transformer architecture, we can
 precisely identify where floating-point arithmetic is required and
 where it might be eliminated. \Cref{tab:fp-map} provides this
-breakdown.
+breakdown, with cross-references to the figures and sections where
+each component was explained.
 
 \begin{table}[htbp]
 \centering
-\caption{Floating-point dependency map of a transformer. Recent
-  research (I-BERT~\cite{kim2021ibert}, I-ViT~\cite{li2022ivit},
+\small
+\caption{Floating-point dependency map of a transformer. The
+  ``Where?'' column links each component to the figure or section
+  where it was introduced. Recent research
+  (I-BERT~\cite{kim2021ibert}, I-ViT~\cite{li2022ivit},
   I-LLM~\cite{hu2024illm}) has demonstrated integer-only
   approximations for components previously thought to require
   floating point.}
 \label{tab:fp-map}
-\begin{tabular}{@{}p{3.2cm}p{2.5cm}p{6.5cm}@{}}
+\begin{tabular}{@{}p{2.6cm}p{1.8cm}p{2.5cm}p{5.2cm}@{}}
   \toprule
-  \textbf{Component} & \textbf{FP required?} & \textbf{Notes} \\
+  \textbf{Component} & \textbf{FP\,req'd?} & \textbf{Where?} & \textbf{Notes} \\
   \midrule
-  Embedding lookup     & No  & Pure table lookup (integer index $\to$ vector). \\
-  QKV projection       & Replaceable & Matrix multiply; BitNet uses ternary weights. \\
-  $\bm{Q}\bm{K}^\top$ dot product & Replaceable & Integer dot product with ternary weights works. \\
-  Softmax              & \textbf{Replaceable} & Integer approximations via polynomial~\cite{kim2021ibert} or bit-shift~\cite{li2022ivit} methods demonstrated. Softmax-free alternatives (linear attention, ReLU attention) also viable. See \cref{sec:softmax-problem}. \\
-  Value aggregation    & Replaceable & Weighted sum; integer weights from approximate softmax suffice. \\
-  Output projection    & Replaceable & Matrix multiply; can use ternary weights. \\
-  Layer normalisation  & \textbf{Replaceable} & Integer normalisation via I-BERT~\cite{kim2021ibert}, I-ViT~\cite{li2022ivit}, and I-LLM~\cite{hu2024illm}. See \cref{sec:layernorm-problem}. \\
-  MLP weights          & Replaceable & BitNet uses ternary $\{-1,0,+1\}$. \\
-  MLP activation       & Replaceable & LUT-compiled or bit-shift approximation (ShiftGELU~\cite{li2022ivit}). \\
-  MoE gating           & Replaceable & Small classification; softmax over few experts. \\
+  Embedding lookup
+    & No
+    & \cref{sec:embeddings}; bottom of Fig.~\ref{fig:full-llm}
+    & Pure table lookup (integer index $\to$ vector). \\[4pt]
+  QKV projection
+    & Replaceable
+    & \cref{sec:self-attention}, Eq.~\ref{eq:qkv}; step~1 in the attention pipeline
+    & Matrix multiply; BitNet uses ternary weights. \\[4pt]
+  $\bm{Q}\bm{K}^\top$ dot product
+    & Replaceable
+    & \cref{sec:self-attention}, Eq.~\ref{eq:attention}; Fig.~\ref{fig:attention-scores}
+    & Integer dot product with ternary weights works. \\[4pt]
+  Softmax
+    & \textbf{Repl.}
+    & Eq.~\ref{eq:softmax}; Fig.~\ref{fig:softmax}
+    & Integer approx.\ via polynomial~\cite{kim2021ibert} or
+      bit-shift~\cite{li2022ivit}. Softmax-free alternatives
+      also viable. See \cref{sec:softmax-problem}. \\[4pt]
+  Value aggregation
+    & Replaceable
+    & Step~5 in \cref{sec:self-attention}
+    & Weighted sum; integer weights from approx.\ softmax suffice. \\[4pt]
+  Output projection
+    & Replaceable
+    & $\bm{W}_O$ in \cref{sec:self-attention}; step~4 of multi-head attention
+    & Matrix multiply; can use ternary weights. \\[4pt]
+  Layer norm
+    & \textbf{Repl.}
+    & \cref{sec:residual-layernorm}; Fig.~\ref{fig:full-llm}
+    & Integer norm via I-BERT~\cite{kim2021ibert},
+      I-ViT~\cite{li2022ivit}, I-LLM~\cite{hu2024illm}.
+      See \cref{sec:layernorm-problem}. \\[4pt]
+  MLP weights
+    & Replaceable
+    & \cref{sec:ffn}; $\bm{W}_1$, $\bm{W}_2$ in
+      Figs.~\ref{fig:ffn},~\ref{fig:ffn-neurons}
+    & BitNet uses ternary $\{-1,0,+1\}$. \\[4pt]
+  MLP activation
+    & Replaceable
+    & $\sigma$ in \cref{sec:ffn}; Fig.~\ref{fig:activations}
+    & LUT-compiled or bit-shift approx.\
+      (ShiftGELU~\cite{li2022ivit}). \\[4pt]
+  MoE gating
+    & Replaceable
+    & \cref{sec:moe}; Fig.~\ref{fig:moe}
+    & Small classification; softmax over few experts. \\
   \bottomrule
 \end{tabular}
 \end{table}
@@ -955,3 +1899,355 @@ no longer ``can we build an integer-only transformer?'' but
 we close that gap?'' \Cref{sec:scaling-llms} explores this in
 detail.
 \end{keyinsight}
+
+% ----------------------------------------------------------------------------
+% Full-page landscape diagram: the complete LLM architecture
+% ----------------------------------------------------------------------------
+
+\begin{landscape}
+\begin{figure}[p]
+\centering
+\begin{tikzpicture}[>=Stealth, x=1cm, y=1cm,
+  % --- Shared styles ---
+  comp/.style={draw, rounded corners=3pt, minimum height=0.7cm,
+    font=\scriptsize\sffamily, align=center, inner sep=4pt},
+  smallcomp/.style={draw, rounded corners=2pt, minimum height=0.55cm,
+    font=\tiny\sffamily, align=center, inner sep=3pt},
+  arr/.style={-{Stealth[length=4pt]}, thick},
+  fatarr/.style={-{Stealth[length=5pt]}, very thick},
+  skiparr/.style={thick, dashed, bitgray},
+  plus/.style={circle, draw, minimum size=0.4cm, font=\tiny,
+    fill=bitgreen!10, inner sep=0pt},
+  neuron/.style={draw, circle, minimum size=0.25cm, inner sep=0pt,
+    fill=#1!15},
+  brace/.style={decorate, decoration={brace, amplitude=5pt, mirror}},
+  bracel/.style={decorate, decoration={brace, amplitude=5pt}},
+  lbl/.style={font=\tiny\sffamily},
+  heading/.style={font=\scriptsize\sffamily\bfseries}
+]
+
+% ============================================================================
+% COLUMN 1: TOKENISER + EMBEDDING (x = 0..4)
+% ============================================================================
+
+% --- Tokeniser ---
+\node[comp, fill=bitgray!8, draw=bitgray, minimum width=3.6cm] (tok)
+  at (2, 0) {Tokeniser};
+\node[lbl, below=1pt of tok, bitgray] {text $\to$ token IDs};
+
+% BPE hint
+\node[lbl, bitgray, text width=3.4cm, align=center] at (2, -1.2)
+  {``The cat sat'' $\to$\\{}[464, 3857, 3290]};
+\node[lbl, bitgray, text width=3.4cm, align=center] at (2, -2.0)
+  {\textit{BPE vocabulary:}\\merge frequent byte pairs};
+
+% --- Embedding table ---
+\node[comp, fill=bitpurple!8, draw=bitpurple, minimum width=3.6cm] (emb)
+  at (2, 2) {Embedding table $\bm{E}$};
+\node[lbl, below right=1pt and -1.3cm of emb, bitpurple]
+  {$V \!\times\! d$ lookup};
+\draw[fatarr] (tok) -- (emb);
+
+% Show lookup table sketch
+\draw[bitpurple!40, thick] (0, 3.0) rectangle (4, 4.6);
+\foreach \i/\lbl in {0/ID 0, 1/ID 1, 2/\dots, 3/ID $V\!-\!1$} {
+  \pgfmathsetmacro{\yy}{3.15 + \i * 0.35}
+  \node[lbl, bitpurple!70, anchor=west] at (0.15, \yy) {\lbl};
+  \ifnum\i<3
+    \draw[bitpurple!20] (0, {\yy + 0.27}) -- (4, {\yy + 0.27});
+  \fi
+}
+\node[lbl, bitpurple, anchor=west] at (1.3, 3.15) {$\leftarrow d$ dims$\rightarrow$};
+\draw[arr, bitpurple] (emb.north) -- (2, 3.0);
+
+% Arrow up from embedding table to transformer blocks
+\draw[fatarr] (2, 4.6) -- (2, 5.4);
+\node[lbl, bitgray, anchor=west] at (2.2, 5.0) {$n \times d$ matrix};
+
+% ============================================================================
+% COLUMN 2: EXPANDED TRANSFORMER BLOCK 1 (x = 5..21)
+% ============================================================================
+
+% --- Block 1 outer frame ---
+\draw[bitblue!50, thick, rounded corners=6pt, fill=bitblue!3]
+  (4.5, -0.5) rectangle (21.5, 14.5);
+\node[heading, bitblue, anchor=north west] at (4.7, 14.35)
+  {Transformer Block 1 (expanded)};
+
+% --- Input to block ---
+\coordinate (blkin) at (13, -0.5);
+
+% ========== SELF-ATTENTION SUB-LAYER (bottom half) ==========
+\node[heading, bitblue!80, anchor=west] at (5.0, -0.1) {Self-Attention};
+
+% Input tokens hint
+\node[lbl, bitgray] at (7.5, 0.3) {$\bm{X}$ ($n \times d$)};
+
+% Q K V projections
+\node[smallcomp, fill=bitblue!12, draw=bitblue, minimum width=2cm]
+  (wq) at (7, 1.5) {$\times\,\bm{W}_Q$};
+\node[smallcomp, fill=bitgreen!12, draw=bitgreen, minimum width=2cm]
+  (wk) at (10.5, 1.5) {$\times\,\bm{W}_K$};
+\node[smallcomp, fill=bitorange!12, draw=bitorange, minimum width=2cm]
+  (wv) at (14, 1.5) {$\times\,\bm{W}_V$};
+
+% Arrows from X to Q,K,V
+\foreach \nd in {wq, wk, wv} {
+  \draw[arr] (7.5, 0.55) -- (\nd.south);
+}
+\node[lbl, bitblue] at (7, 2.05) {$\bm{Q}$};
+\node[lbl, bitgreen] at (10.5, 2.05) {$\bm{K}$};
+\node[lbl, bitorange] at (14, 2.05) {$\bm{V}$};
+
+% Multi-head split hint
+\draw[bracel, bitgray, thick] (5.8, 2.2) -- (15.2, 2.2);
+\node[lbl, bitgray, above=3pt] at (10.5, 2.2)
+  {split into $h$ heads (each $d_k = d/h$)};
+
+% --- Dot product QK^T ---
+\node[smallcomp, fill=bitblue!8, draw=bitblue, minimum width=2.4cm]
+  (qk) at (8.75, 3.2) {$\bm{Q}\bm{K}^\top$};
+\draw[arr, bitblue] (7, 2.1) -- (7, 2.8) -| (qk.south west);
+\draw[arr, bitgreen] (10.5, 2.1) -- (10.5, 2.8) -| (qk.south east);
+
+% --- Scale ---
+\node[smallcomp, fill=bitgray!8, draw=bitgray, minimum width=2.4cm]
+  (scale) at (8.75, 4.2) {$\div\,\sqrt{d_k}$};
+\draw[arr] (qk) -- (scale);
+
+% --- Softmax (with small curve) ---
+\node[smallcomp, fill=bitorange!8, draw=bitorange, minimum width=2.4cm]
+  (sfm) at (8.75, 5.2) {softmax};
+\draw[arr] (scale) -- (sfm);
+
+% Tiny softmax curve
+\begin{scope}[shift={(10.5, 5.05)}, scale=0.3]
+  \draw[bitorange, thick, smooth] plot[domain=-2:2, samples=30]
+    ({\x}, {1/(1+exp(-3*\x))});
+  \draw[gray, thin] (-2, 0) -- (2, 0);
+\end{scope}
+
+% --- Value aggregation ---
+\node[smallcomp, fill=bitorange!8, draw=bitorange, minimum width=2.4cm]
+  (agg) at (11.75, 5.2) {$\times\,\bm{V}$};
+\draw[arr] (sfm) -- (agg);
+\draw[arr, bitorange] (14, 2.1) -- (14, 4.8) -| (agg.south);
+
+% --- Multi-head dots ---
+\node[font=\scriptsize, bitgray] at (15.5, 3.6) {$\times h$};
+\node[font=\scriptsize, bitgray] at (15.5, 3.0) {heads};
+\draw[bitgray, thick, dotted] (14.8, 2.5) -- (14.8, 5.6);
+\node[font=\large, bitgray] at (16.2, 4.2) {$\cdots$};
+
+% Concat
+\node[smallcomp, fill=bitgray!8, draw=bitgray, minimum width=2.0cm]
+  (concat) at (11.75, 6.2) {concat};
+\draw[arr] (agg) -- (concat);
+
+% Output projection W_O
+\node[smallcomp, fill=bitblue!10, draw=bitblue, minimum width=2.4cm]
+  (wo) at (11.75, 7.1) {$\times\,\bm{W}_O$};
+\draw[arr] (concat) -- (wo);
+
+% --- Residual + LayerNorm 1 ---
+\node[plus] (add1) at (11.75, 8.0) {$+$};
+\draw[arr] (wo) -- (add1);
+
+% Skip connection from input
+\draw[skiparr] (5.5, 0.3) -- (5.5, 8.0) -- (add1.west);
+\node[lbl, bitgray, rotate=90, anchor=south] at (5.2, 4.2)
+  {residual (skip)};
+
+\node[smallcomp, fill=bitgray!10, draw=bitgray, minimum width=2.8cm]
+  (ln1) at (11.75, 8.9) {Layer Norm};
+\draw[arr] (add1) -- (ln1);
+
+% ========== MLP SUB-LAYER (top half) ==========
+\node[heading, bitorange!80, anchor=west] at (5.0, 9.5)
+  {Feed-Forward Network (MLP)};
+
+% W1 expand
+\node[smallcomp, fill=bitorange!12, draw=bitorange, minimum width=2.4cm]
+  (mlpw1) at (9, 10.2) {$\times\,\bm{W}_1$ \textit{expand}};
+\draw[arr] (ln1.north) -| (mlpw1.south);
+\node[lbl, bitorange] at (9, 10.7) {$d \to 4d$};
+
+% Activation
+\node[smallcomp, fill=bitgreen!12, draw=bitgreen, minimum width=2.0cm]
+  (act) at (13, 10.2) {$\sigma$ (GELU)};
+\draw[arr] (mlpw1) -- (act);
+
+% Tiny GELU curve
+\begin{scope}[shift={(14.7, 10.05)}, scale=0.28]
+  \draw[bitgreen, thick, smooth] plot[domain=-2.5:2.5, samples=30]
+    ({\x}, {\x/(1+exp(-1.702*\x))});
+  \draw[gray, thin] (-2.5, 0) -- (2.5, 0);
+\end{scope}
+
+% W2 compress
+\node[smallcomp, fill=bitorange!12, draw=bitorange, minimum width=2.4cm]
+  (mlpw2) at (17, 10.2) {$\times\,\bm{W}_2$ \textit{compress}};
+\draw[arr] (act) -- (mlpw2);
+\node[lbl, bitorange] at (17, 10.7) {$4d \to d$};
+
+% Neuron dots (abstract MLP representation)
+\foreach \i in {1,...,3} {
+  \node[neuron=bitorange] at ({8.2 + \i*0.35}, 11.3) {};
+}
+\node[font=\tiny, bitorange] at (10.2, 11.3) {$\cdots$};
+\foreach \i in {1,...,6} {
+  \node[neuron=bitorange] at ({11.0 + \i*0.35}, 11.3) {};
+}
+\node[font=\tiny, bitorange] at (14.3, 11.3) {$\cdots$};
+\foreach \i in {1,...,3} {
+  \node[neuron=bitorange] at ({15.0 + \i*0.35}, 11.3) {};
+}
+\node[lbl, bitorange] at (12.5, 11.8) {$d$ $\to$ $4d$ $\to$ $d$ neurons};
+
+% --- Residual + LayerNorm 2 ---
+\node[plus] (add2) at (17, 12.0) {$+$};
+\draw[arr] (mlpw2.north) -- (17, 11.5) -- (add2.south);
+
+% Skip connection from LN1
+\draw[skiparr] (5.8, 8.9) -- (5.8, 12.0) -- (add2.west);
+\node[lbl, bitgray, rotate=90, anchor=south] at (5.5, 10.5)
+  {residual};
+
+\node[smallcomp, fill=bitgray!10, draw=bitgray, minimum width=2.8cm]
+  (ln2) at (17, 13.0) {Layer Norm};
+\draw[arr] (add2) -- (ln2);
+
+% Output of block 1
+\draw[fatarr] (ln2.north) -- (17, 14.5);
+
+% ============================================================================
+% COLUMN 3: STACKED BLOCKS 2..N + OUTPUT HEAD (x = 22..27)
+% ============================================================================
+
+% Arrow from block 1 to block stack
+\draw[fatarr] (17, 14.5) -- (17, 15.2) -| (24, 14.5);
+
+% Block 2
+\node[comp, fill=bitblue!8, draw=bitblue, minimum width=3.8cm]
+  (b2) at (24, 13.8) {Transformer Block 2};
+\draw[arr] (24, 14.5) -- (b2.north);
+
+% Dots
+\node[font=\sffamily, bitgray] (bdots) at (24, 12.6) {$\vdots$};
+\draw[arr] (b2.south) -- (bdots.north);
+
+% Block N
+\node[comp, fill=bitblue!8, draw=bitblue, minimum width=3.8cm]
+  (bn) at (24, 11.4) {Transformer Block $N$};
+\draw[arr] (bdots.south) -- (bn.north);
+
+% Brace for N blocks
+\draw[brace, thick, bitblue] (26.2, 14.2) -- (26.2, 11.1);
+\node[lbl, bitblue, anchor=west, text width=1.5cm] at (26.6, 12.65)
+  {$N$ layers\\(32--126)};
+
+% --- Final layer norm ---
+\node[comp, fill=bitgray!8, draw=bitgray, minimum width=3.8cm]
+  (finln) at (24, 9.8) {Final Layer Norm};
+\draw[fatarr] (bn.south) -- (finln.north);
+
+% --- Output head ---
+\node[heading, bitgreen!80] at (24, 9.0) {Output Head};
+
+% W_vocab projection
+\node[comp, fill=bitgreen!10, draw=bitgreen, minimum width=3.8cm]
+  (wvoc) at (24, 8.0) {$\times\,\bm{W}_{\text{vocab}}$};
+\draw[arr] (finln.south) -- (wvoc.north);
+\node[lbl, bitgreen] at (24, 7.45) {$d \to V$ projection};
+
+% Logits
+\node[comp, fill=bitgreen!6, draw=bitgreen, minimum width=3.8cm]
+  (logits) at (24, 6.4) {logits ($V$ raw scores)};
+\draw[arr] (wvoc.south) -- (logits.north);
+
+% Softmax
+\node[comp, fill=bitorange!10, draw=bitorange, minimum width=3.8cm]
+  (outsm) at (24, 5.0) {softmax};
+\draw[arr] (logits.south) -- (outsm.north);
+
+% Tiny softmax curve for output
+\begin{scope}[shift={(26.4, 4.85)}, scale=0.3]
+  \draw[bitorange, thick, smooth] plot[domain=-2:2, samples=30]
+    ({\x}, {1/(1+exp(-3*\x))});
+  \draw[gray, thin] (-2, 0) -- (2, 0);
+\end{scope}
+
+% Probabilities
+\node[comp, fill=bitorange!6, draw=bitorange, minimum width=3.8cm]
+  (probs) at (24, 3.6) {probabilities ($\sum\!=\!1$)};
+\draw[arr] (outsm.south) -- (probs.north);
+
+% Probability bar chart (mini)
+\begin{scope}[shift={(22.1, 2.0)}]
+  \foreach \i/\h/\c in {0/0.6/bitorange, 1/0.22/bitorange!60,
+    2/0.08/bitorange!40, 3/0.04/bitorange!25, 4/0.02/bitorange!15} {
+    \fill[\c] ({\i*0.42}, 0) rectangle ({\i*0.42+0.32}, {\h*1.5});
+  }
+  \node[font=\tiny, bitorange] at (2.5, 0.5) {$\cdots$};
+  \node[lbl, bitorange] at (1.5, -0.3) {$V$ tokens};
+\end{scope}
+
+% Sampled token
+\node[comp, fill=bitgreen!15, draw=bitgreen, minimum width=3.8cm]
+  (sample) at (24, 0.8) {sample $\to$ next token};
+\draw[arr] (probs.south) -- (24, 2.9) -- (24, 1.15);
+
+% ============================================================================
+% AUTOREGRESSIVE LOOP ARROW
+% ============================================================================
+
+% Arrow from sampled token looping back to tokeniser input
+\draw[fatarr, bitgreen!70!black, rounded corners=8pt]
+  (24, 0.45) -- (24, -1.6) -- (2, -1.6) -- (2, -0.35);
+\node[lbl, bitgreen!70!black, fill=white, inner sep=2pt] at (13, -1.6)
+  {autoregressive loop: append token, repeat};
+
+% ============================================================================
+% CONNECTING ARROWS between columns
+% ============================================================================
+
+% Embedding output to Block 1 input
+\draw[fatarr] (2, 5.4) -- (2, 7.0) -- (7.5, 7.0) -- (7.5, 0.3);
+\node[lbl, bitgray, fill=white, inner sep=1pt] at (4.8, 7.2)
+  {+ positional encoding};
+
+% ============================================================================
+% TITLE AND ANNOTATIONS
+% ============================================================================
+
+\node[font=\small\sffamily\bfseries, bitblue!80!black, anchor=north west]
+  at (0, 15.3) {The Complete LLM Architecture: End-to-End Pipeline};
+
+% Dimension annotations
+\node[lbl, bitgray, text width=3cm, align=center] at (2, 5.8)
+  {$n$ tokens\\$d$ dims each};
+
+\end{tikzpicture}
+\caption[The complete LLM architecture in a single view.]{%
+  The complete LLM architecture in a single view, integrating all
+  components from this section. \textbf{Left:} the tokeniser converts
+  text to integer IDs, which index into the embedding table $\bm{E}$
+  ($V \times d$). \textbf{Centre:} Transformer Block~1 is expanded to
+  show the self-attention sub-layer (Q/K/V projections, scaled dot
+  product, softmax, value aggregation, output projection $\bm{W}_O$,
+  with $h$ parallel heads) and the MLP sub-layer ($\bm{W}_1$ expand,
+  GELU activation, $\bm{W}_2$ compress), each with residual
+  connections and layer normalisation. \textbf{Right:} Blocks 2
+  through $N$ are stacked compactly, followed by the final layer norm,
+  output head ($\bm{W}_{\text{vocab}}$ projection $\to$ logits $\to$
+  softmax $\to$ probabilities $\to$ sampled token), and the
+  autoregressive loop that feeds each generated token back as input.
+  Cross-references: attention mechanism
+  (\cref{fig:attention-scores,fig:multi-head}), MLP block
+  (\cref{fig:ffn,fig:ffn-neurons}), residual connections
+  (\cref{fig:residual}), output head
+  (\cref{fig:autoregressive}), component stack
+  (\cref{fig:full-llm}).}
+\label{fig:llm-full-picture}
+\end{figure}
+\end{landscape}

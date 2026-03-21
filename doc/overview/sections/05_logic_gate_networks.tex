@@ -236,8 +236,16 @@ This is why the single softmax-over-16-gates mechanism
 
 During training, the network operates in ``soft'' mode: gate outputs
 are real-valued probabilities, and gradients flow through the weighted
-sum. As training progresses, the distributions sharpen (via temperature
-annealing or Gumbel-softmax), until each node has a clear winner.
+sum. As training progresses, the distributions sharpen until each node
+has a clear winner. Two common techniques drive this sharpening:
+\emph{temperature annealing} gradually lowers a temperature parameter
+that controls how peaked the softmax distribution is---high temperature
+gives near-uniform probabilities, low temperature approaches a hard
+one-hot selection. The \emph{Gumbel-softmax} trick adds carefully
+calibrated random noise before the softmax, which lets the network
+explore different gate choices early in training while still permitting
+gradient flow (unlike a hard \texttt{argmax}, which is not
+differentiable).
 
 At inference time, each node commits to its most probable gate type
 and operates in pure binary logic---no floating-point, no

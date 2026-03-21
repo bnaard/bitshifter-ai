@@ -78,21 +78,21 @@ its strengths are most relevant:
   arr/.style={-{Stealth[length=5pt]}, thick},
   note/.style={font=\scriptsize\sffamily, text width=5cm}
 ]
-  % Components stack
+  % Components stack (with section/figure references)
   \node[comp, fill=bitgray!5] (emb) at (0, 0)
-    {Embedding lookup};
+    {Embedding lookup\\[-2pt]{\tiny\S\,9.3, Fig.~\ref{fig:full-llm} bottom}};
   \node[comp, fill=bitblue!8] (qkv) at (0, 1.5)
-    {QKV projection};
+    {QKV projection\\[-2pt]{\tiny\S\,9.5, Eq.~\ref{eq:qkv}}};
   \node[comp, fill=bitpurple!8, draw=bitpurple!40] (attn) at (0, 3)
-    {Attention softmax};
+    {Attention softmax\\[-2pt]{\tiny\S\,9.5, Figs.~\ref{fig:softmax},~\ref{fig:attention-scores}}};
   \node[comp, fill=bitblue!8] (oproj) at (0, 4.5)
-    {Output projection};
+    {Output projection\\[-2pt]{\tiny\S\,9.5.4, $\bm{W}_O$ in multi-head}};
   \node[comp, fill=bitpurple!8, draw=bitpurple!40] (ln) at (0, 6)
-    {Layer normalisation};
+    {Layer normalisation\\[-2pt]{\tiny\S\,9.7.2, Fig.~\ref{fig:full-llm}}};
   \node[comp, fill=bitorange!8] (mlp) at (0, 7.5)
-    {MLP / feed-forward};
+    {MLP / feed-forward\\[-2pt]{\tiny\S\,9.6, Figs.~\ref{fig:ffn},~\ref{fig:ffn-neurons}}};
   \node[comp, fill=bitgreen!8] (gate) at (0, 9)
-    {MoE router (if used)};
+    {MoE router (if used)\\[-2pt]{\tiny\S\,9.10, Fig.~\ref{fig:moe}}};
 
   % Paradigm labels
   \node[paradigm=bitgray, right] at (3.5, 0)
