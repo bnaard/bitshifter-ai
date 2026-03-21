@@ -665,15 +665,15 @@ operations are already proven to work at extreme quantisation levels.
 \begin{landscape}
 \begin{figure}[p]
 \centering
-\begin{tikzpicture}[>=Stealth, x=1cm, y=1cm,
+\begin{tikzpicture}[>=Stealth, x=0.84cm, y=0.84cm,
   % --- Shared styles ---
-  comp/.style={draw, rounded corners=3pt, minimum height=0.7cm,
-    font=\scriptsize\sffamily, align=center, inner sep=4pt},
-  smallcomp/.style={draw, rounded corners=2pt, minimum height=0.55cm,
-    font=\tiny\sffamily, align=center, inner sep=3pt},
+  comp/.style={draw, rounded corners=3pt, minimum height=0.65cm,
+    font=\scriptsize\sffamily, align=center, inner sep=3pt},
+  smallcomp/.style={draw, rounded corners=2pt, minimum height=0.5cm,
+    font=\tiny\sffamily, align=center, inner sep=2pt},
   arr/.style={-{Stealth[length=4pt]}, thick},
   fatarr/.style={-{Stealth[length=5pt]}, very thick},
-  plus/.style={circle, draw, minimum size=0.4cm, font=\tiny,
+  plus/.style={circle, draw, minimum size=0.35cm, font=\tiny,
     fill=bitgreen!10, inner sep=0pt},
   brace/.style={decorate, decoration={brace, amplitude=5pt, mirror}},
   bracel/.style={decorate, decoration={brace, amplitude=5pt}},
@@ -683,172 +683,172 @@ operations are already proven to work at extreme quantisation levels.
 % ============================================================================
 % COLUMN 1: Tokeniser + Embedding (same as transformer)
 % ============================================================================
-\node[font=\small\sffamily\bfseries, bitblue!80!black] at (2, 14.5)
+\node[font=\small\sffamily\bfseries, bitblue!80!black] at (2, 14.0)
   {Tokeniser + Embedding};
 
 % Token boxes
 \foreach \i/\tok in {0/The, 1/\_cat, 2/\_sat, 3/\_on, 4/\_the, 5/\_mat} {
-  \node[comp, fill=bitgray!10, minimum width=1.2cm]
-    (tok\i) at ({\i*0.9+0.2}, 13) {\tok};
+  \node[comp, fill=bitgray!10, minimum width=1.1cm]
+    (tok\i) at ({\i*0.85+0.2}, 12.8) {\tok};
 }
 
 % ID boxes
 \foreach \i/\id in {0/464, 1/5023, 2/3156, 3/322, 4/279, 5/8643} {
-  \node[smallcomp, fill=bitblue!8, minimum width=1.0cm]
-    (id\i) at ({\i*0.9+0.2}, 12) {\id};
+  \node[smallcomp, fill=bitblue!8, minimum width=0.95cm]
+    (id\i) at ({\i*0.85+0.2}, 11.9) {\id};
   \draw[arr, bitgray] (tok\i) -- (id\i);
 }
 
 % Embedding table
-\node[comp, fill=bitblue!15, minimum width=5.4cm, minimum height=1.2cm]
-  (emb) at (2.45, 10.3)
+\node[comp, fill=bitblue!15, minimum width=5.0cm, minimum height=1.0cm]
+  (emb) at (2.35, 10.3)
   {Embedding Table $\bm{E}$\\$V \times d$};
 \foreach \i in {0,...,5} {
-  \draw[arr, bitblue!60] (id\i) -- ({\i*0.9+0.2}, 10.95);
+  \draw[arr, bitblue!60] (id\i) -- ({\i*0.85+0.2}, 10.85);
 }
 
 % Embedding output vectors
-\node[comp, fill=bitblue!10, minimum width=5.4cm]
-  (embout) at (2.45, 8.8)
+\node[comp, fill=bitblue!10, minimum width=5.0cm]
+  (embout) at (2.35, 8.8)
   {$n$ vectors, $d$ dims each};
 \draw[arr] (emb) -- (embout);
 
 % ============================================================================
 % COLUMN 2: Mamba Block (expanded)
 % ============================================================================
-\node[font=\small\sffamily\bfseries, bitorange!80!black] at (12.5, 14.5)
+\node[font=\small\sffamily\bfseries, bitorange!80!black] at (12.5, 14.0)
   {Mamba Block (expanded)};
 
 % Input
-\node[comp, fill=bitgray!10, minimum width=2.5cm]
-  (blkin) at (12.5, 13) {Block input $x$};
+\node[comp, fill=bitgray!10, minimum width=2.4cm]
+  (blkin) at (12.5, 12.8) {Block input $x$};
 
 % Layer norm
-\node[comp, fill=bitgray!15, minimum width=2.5cm]
-  (norm1) at (12.5, 11.8) {RMSNorm};
+\node[comp, fill=bitgray!15, minimum width=2.4cm]
+  (norm1) at (12.5, 11.6) {RMSNorm};
 \draw[arr] (blkin) -- (norm1);
 
 % Two linear projections (branches)
-\node[comp, fill=bitblue!12, minimum width=2.2cm]
+\node[comp, fill=bitblue!12, minimum width=2.1cm]
   (linA) at (10.5, 10.3) {Linear ($d \!\to\! Ed$)};
-\node[comp, fill=bitblue!12, minimum width=2.2cm]
+\node[comp, fill=bitblue!12, minimum width=2.1cm]
   (linB) at (14.5, 10.3) {Linear ($d \!\to\! Ed$)};
-\draw[arr] (norm1.south) -- ++(0,-0.3) -| (linA.north);
-\draw[arr] (norm1.south) -- ++(0,-0.3) -| (linB.north);
+\draw[arr] (norm1.south) -- ++(0,-0.25) -| (linA.north);
+\draw[arr] (norm1.south) -- ++(0,-0.25) -| (linB.north);
 
 % Left branch: Conv1d
-\node[comp, fill=bitorange!12, minimum width=2.2cm]
-  (conv1d) at (10.5, 8.8) {Conv1d ($k\!=\!4$)};
+\node[comp, fill=bitorange!12, minimum width=2.1cm]
+  (conv1d) at (10.5, 8.9) {Conv1d ($k\!=\!4$)};
 \draw[arr] (linA) -- (conv1d);
 
 % Left branch: SiLU
-\node[comp, fill=bitorange!12, minimum width=2.2cm]
-  (silu1) at (10.5, 7.5) {SiLU $\sigma(x) \!\cdot\! x$};
+\node[comp, fill=bitorange!12, minimum width=2.1cm]
+  (silu1) at (10.5, 7.7) {SiLU $\sigma(x) \!\cdot\! x$};
 \draw[arr] (conv1d) -- (silu1);
 
 % SSM parameters
-\node[comp, fill=bitpurple!15, minimum width=2.2cm, minimum height=1.0cm]
-  (ssmparams) at (10.5, 5.8)
+\node[comp, fill=bitpurple!15, minimum width=2.1cm, minimum height=0.9cm]
+  (ssmparams) at (10.5, 6.2)
   {Selection\\[-2pt]\tiny $B_t, C_t, \Delta_t = f(x_t)$};
 \draw[arr] (silu1) -- (ssmparams);
 
 % SSM core
-\node[comp, fill=bitpurple!20, minimum width=2.2cm, minimum height=1.2cm]
-  (ssmcore) at (10.5, 3.8)
+\node[comp, fill=bitpurple!20, minimum width=2.1cm, minimum height=1.1cm]
+  (ssmcore) at (10.5, 4.4)
   {SSM scan\\[-2pt]\tiny $h_t = \bar{A}_t h_{t\text{-}1} + \bar{B}_t x_t$\\[-2pt]
    \tiny $y_t = C_t h_t$};
 \draw[arr] (ssmparams) -- (ssmcore);
 
 % A parameter (fixed, diagonal)
-\node[smallcomp, fill=bitpurple!8, minimum width=1.4cm]
-  (Aparam) at (8, 4.8) {\tiny $A$ (learned,\\[-2pt]\tiny diagonal)};
+\node[smallcomp, fill=bitpurple!8, minimum width=1.3cm]
+  (Aparam) at (8, 5.3) {\tiny $A$ (learned,\\[-2pt]\tiny diagonal)};
 \draw[arr, bitpurple!60] (Aparam) -- (ssmcore);
 
 % Right branch: SiLU (gating)
-\node[comp, fill=bitorange!12, minimum width=2.2cm]
-  (silu2) at (14.5, 7.5) {SiLU (gate)};
-\draw[arr] (linB) -- ++(0,-2.1) -- (silu2);
+\node[comp, fill=bitorange!12, minimum width=2.1cm]
+  (silu2) at (14.5, 7.7) {SiLU (gate)};
+\draw[arr] (linB) -- ++(0,-1.9) -- (silu2);
 
 % Element-wise multiply
-\node[font=\normalsize, inner sep=2pt] (mult) at (12.5, 2.5) {$\otimes$};
-\draw[arr] (ssmcore) -- ++(0,-0.5) -| (mult);
-\draw[arr] (silu2) -- ++(0,-4.3) -| (mult);
+\node[font=\normalsize, inner sep=2pt] (mult) at (12.5, 3.1) {$\otimes$};
+\draw[arr] (ssmcore) -- ++(0,-0.45) -| (mult);
+\draw[arr] (silu2) -- ++(0,-3.95) -| (mult);
 
 % Output projection
-\node[comp, fill=bitblue!12, minimum width=2.5cm]
-  (outproj) at (12.5, 1.3) {Linear ($Ed \!\to\! d$)};
+\node[comp, fill=bitblue!12, minimum width=2.4cm]
+  (outproj) at (12.5, 2.0) {Linear ($Ed \!\to\! d$)};
 \draw[arr] (mult) -- (outproj);
 
 % Residual connection
-\node[plus] (res1) at (12.5, 0.2) {$+$};
+\node[plus] (res1) at (12.5, 1.0) {$+$};
 \draw[arr] (outproj) -- (res1);
 \draw[arr, dashed, bitgreen!60!black, rounded corners=5pt]
-  (blkin.east) -- ++(1.5, 0) -- ++(0, -12.8) -- (res1.east);
+  (blkin.east) -- ++(1.5, 0) -- ++(0, -11.8) -- (res1.east);
 
 % Block output
-\node[comp, fill=bitgray!10, minimum width=2.5cm]
-  (blkout) at (12.5, -0.8) {Block output};
+\node[comp, fill=bitgray!10, minimum width=2.4cm]
+  (blkout) at (12.5, 0.0) {Block output};
 \draw[arr] (res1) -- (blkout);
 
 % Annotations
 \node[lbl, bitorange, anchor=east, text width=1.5cm, align=right]
-  at (8.5, 8.8) {local\\context};
+  at (8.5, 8.9) {local\\context};
 \node[lbl, bitpurple, anchor=east, text width=2cm, align=right]
-  at (8.0, 5.8) {input-\\dependent};
+  at (8.0, 6.2) {input-\\dependent};
 \node[lbl, bitpurple, anchor=east, text width=2cm, align=right]
-  at (8.0, 3.8) {selective\\scan};
-\node[lbl, bitorange, anchor=west, text width=2cm, align=left] at (16, 7.5)
+  at (8.0, 4.4) {selective\\scan};
+\node[lbl, bitorange, anchor=west, text width=2cm, align=left] at (16, 7.7)
   {gating\\branch};
-\node[lbl, bitgreen!60!black, anchor=west] at (14.5, -0.1)
+\node[lbl, bitgreen!60!black, anchor=west] at (14.5, 0.7)
   {residual};
 
 % ============================================================================
 % COLUMN 3: Stacked blocks + Output head
 % ============================================================================
-\node[font=\small\sffamily\bfseries, bitgreen!70!black] at (22, 14.5)
+\node[font=\small\sffamily\bfseries, bitgreen!70!black] at (22, 14.0)
   {Stack + Output Head};
 
 % Stacked blocks
-\node[comp, fill=bitorange!8, minimum width=3.5cm, minimum height=0.7cm]
+\node[comp, fill=bitorange!8, minimum width=3.4cm, minimum height=0.65cm]
   (b1) at (22, 12.5) {Mamba Block 1};
-\node[comp, fill=bitorange!8, minimum width=3.5cm, minimum height=0.7cm]
-  (b2) at (22, 11.3) {Mamba Block 2};
-\node[font=\large, bitgray] at (22, 10.3) {$\vdots$};
-\node[comp, fill=bitorange!8, minimum width=3.5cm, minimum height=0.7cm]
-  (bN) at (22, 9.3) {Mamba Block $N$};
+\node[comp, fill=bitorange!8, minimum width=3.4cm, minimum height=0.65cm]
+  (b2) at (22, 11.4) {Mamba Block 2};
+\node[font=\large, bitgray] at (22, 10.5) {$\vdots$};
+\node[comp, fill=bitorange!8, minimum width=3.4cm, minimum height=0.65cm]
+  (bN) at (22, 9.6) {Mamba Block $N$};
 
 \draw[arr] (b1) -- (b2);
-\draw[arr, bitgray, densely dotted] (b2) -- ++(0, -0.6);
-\draw[arr, bitgray, densely dotted] (22, 10.0) -- (bN);
+\draw[arr, bitgray, densely dotted] (b2) -- ++(0, -0.55);
+\draw[arr, bitgray, densely dotted] (22, 10.2) -- (bN);
 
 % Final norm
-\node[comp, fill=bitgray!15, minimum width=3.5cm]
-  (finalnorm) at (22, 8.0) {RMSNorm};
+\node[comp, fill=bitgray!15, minimum width=3.4cm]
+  (finalnorm) at (22, 8.3) {RMSNorm};
 \draw[arr] (bN) -- (finalnorm);
 
 % Output projection
-\node[comp, fill=bitblue!12, minimum width=3.5cm]
-  (vocabproj) at (22, 6.7) {$\bm{W}_{\text{vocab}}$ ($d \!\to\! V$)};
+\node[comp, fill=bitblue!12, minimum width=3.4cm]
+  (vocabproj) at (22, 7.1) {$\bm{W}_{\text{vocab}}$ ($d \!\to\! V$)};
 \draw[arr] (finalnorm) -- (vocabproj);
 
 % Logits
-\node[comp, fill=bitgray!8, minimum width=3.5cm]
-  (logits) at (22, 5.4) {Logits (size $V$)};
+\node[comp, fill=bitgray!8, minimum width=3.4cm]
+  (logits) at (22, 5.9) {Logits (size $V$)};
 \draw[arr] (vocabproj) -- (logits);
 
 % Softmax
-\node[comp, fill=bitgreen!12, minimum width=3.5cm]
-  (softmax) at (22, 4.1) {Softmax};
+\node[comp, fill=bitgreen!12, minimum width=3.4cm]
+  (softmax) at (22, 4.7) {Softmax};
 \draw[arr] (logits) -- (softmax);
 
 % Probabilities
-\node[comp, fill=bitgreen!8, minimum width=3.5cm]
-  (probs) at (22, 2.8) {Probabilities};
+\node[comp, fill=bitgreen!8, minimum width=3.4cm]
+  (probs) at (22, 3.5) {Probabilities};
 \draw[arr] (softmax) -- (probs);
 
 % Sample
-\node[comp, fill=bitgreen!15, minimum width=3.5cm]
-  (sample) at (22, 1.5) {Sample next token};
+\node[comp, fill=bitgreen!15, minimum width=3.4cm]
+  (sample) at (22, 2.3) {Sample next token};
 \draw[arr] (probs) -- (sample);
 
 % ============================================================================
@@ -859,31 +859,31 @@ operations are already proven to work at extreme quantisation levels.
 \draw[fatarr] (embout.east) -- ++(1, 0) |- (b1.west);
 
 % Block detail connection (from column 2 to column 3 stack)
+% Route along right side of column 2, avoiding low y-values
 \draw[fatarr, bitorange!50, dashed]
-  (blkout.south) -- ++(0, -1.5) -- ++(8, 0) -- ++(0, 15.5)
-  -- (b1.south east);
-\node[lbl, bitorange, fill=white, inner sep=1pt] at (17, -2.3)
+  (blkout.east) -- ++(4, 0) -- ++(0, 12.5) -- (b1.south east);
+\node[lbl, bitorange, fill=white, inner sep=1pt] at (17.5, 6.5)
   {detail of each block};
 
 % Autoregressive loop
 \draw[fatarr, bitgreen!70!black, rounded corners=8pt]
-  (sample.south) -- ++(0, -1) -- (2, -0.5) -- (2, 8.2);
+  (sample.south) -- ++(0, -0.8) -- (2, 0.8) -- (2, 8.2);
 \node[lbl, bitgreen!70!black, fill=white, inner sep=2pt]
-  at (12, -0.5) {autoregressive loop: append token, repeat};
+  at (12, 0.8) {autoregressive loop: append token, repeat};
 
 % ============================================================================
 % TITLE
 % ============================================================================
 \node[font=\small\sffamily\bfseries, bitblue!80!black, anchor=north west]
-  at (0, 15.3)
+  at (0, 14.8)
   {The Complete Mamba Architecture: End-to-End Pipeline};
 
 % Dimension annotations
-\node[lbl, bitgray, text width=3cm, align=center] at (2.45, 9.5)
+\node[lbl, bitgray, text width=3cm, align=center] at (2.35, 9.5)
   {$n$ tokens\\$d$ dims each};
 
 % State size annotation
-\node[lbl, bitpurple, text width=2.5cm, align=center] at (8, 3.2)
+\node[lbl, bitpurple, text width=2.5cm, align=center] at (8, 3.7)
   {state size $s$\\(typically 16--64)};
 
 \end{tikzpicture}

@@ -1907,7 +1907,7 @@ detail.
 \begin{landscape}
 \begin{figure}[p]
 \centering
-\begin{tikzpicture}[>=Stealth, x=1cm, y=1cm,
+\begin{tikzpicture}[>=Stealth, x=0.75cm, y=0.75cm,
   % --- Shared styles ---
   comp/.style={draw, rounded corners=3pt, minimum height=0.7cm,
     font=\scriptsize\sffamily, align=center, inner sep=4pt},
@@ -1923,7 +1923,10 @@ detail.
   brace/.style={decorate, decoration={brace, amplitude=5pt, mirror}},
   bracel/.style={decorate, decoration={brace, amplitude=5pt}},
   lbl/.style={font=\tiny\sffamily},
-  heading/.style={font=\scriptsize\sffamily\bfseries}
+  heading/.style={font=\scriptsize\sffamily\bfseries},
+  % Mini-figure inset style for function sketches
+  minicurve/.style={draw, rounded corners=1pt, fill=white,
+    minimum width=0.9cm, minimum height=0.7cm, inner sep=1pt}
 ]
 
 % ============================================================================
@@ -1936,10 +1939,8 @@ detail.
 \node[lbl, below=1pt of tok, bitgray] {text $\to$ token IDs};
 
 % BPE hint
-\node[lbl, bitgray, text width=3.4cm, align=center] at (2, -1.2)
+\node[lbl, bitgray, text width=3.4cm, align=center] at (2, -1.0)
   {``The cat sat'' $\to$\\{}[464, 3857, 3290]};
-\node[lbl, bitgray, text width=3.4cm, align=center] at (2, -2.0)
-  {\textit{BPE vocabulary:}\\merge frequent byte pairs};
 
 % --- Embedding table ---
 \node[comp, fill=bitpurple!8, draw=bitpurple, minimum width=3.6cm] (emb)
@@ -1965,17 +1966,17 @@ detail.
 \node[lbl, bitgray, anchor=west] at (2.2, 5.0) {$n \times d$ matrix};
 
 % ============================================================================
-% COLUMN 2: EXPANDED TRANSFORMER BLOCK 1 (x = 5..21)
+% COLUMN 2: EXPANDED TRANSFORMER BLOCK 1 (x = 4.5..19)
 % ============================================================================
 
 % --- Block 1 outer frame ---
 \draw[bitblue!50, thick, rounded corners=6pt, fill=bitblue!3]
-  (4.5, -0.5) rectangle (21.5, 14.5);
-\node[heading, bitblue, anchor=north west] at (4.7, 14.35)
+  (4.5, -0.5) rectangle (19.0, 14.0);
+\node[heading, bitblue, anchor=north west] at (4.7, 13.85)
   {Transformer Block 1 (expanded)};
 
 % --- Input to block ---
-\coordinate (blkin) at (13, -0.5);
+\coordinate (blkin) at (12, -0.5);
 
 % ========== SELF-ATTENTION SUB-LAYER (bottom half) ==========
 \node[heading, bitblue!80, anchor=west] at (5.0, -0.1) {Self-Attention};
@@ -1984,82 +1985,86 @@ detail.
 \node[lbl, bitgray] at (7.5, 0.3) {$\bm{X}$ ($n \times d$)};
 
 % Q K V projections
-\node[smallcomp, fill=bitblue!12, draw=bitblue, minimum width=2cm]
+\node[smallcomp, fill=bitblue!12, draw=bitblue, minimum width=1.8cm]
   (wq) at (7, 1.5) {$\times\,\bm{W}_Q$};
-\node[smallcomp, fill=bitgreen!12, draw=bitgreen, minimum width=2cm]
-  (wk) at (10.5, 1.5) {$\times\,\bm{W}_K$};
-\node[smallcomp, fill=bitorange!12, draw=bitorange, minimum width=2cm]
-  (wv) at (14, 1.5) {$\times\,\bm{W}_V$};
+\node[smallcomp, fill=bitgreen!12, draw=bitgreen, minimum width=1.8cm]
+  (wk) at (10, 1.5) {$\times\,\bm{W}_K$};
+\node[smallcomp, fill=bitorange!12, draw=bitorange, minimum width=1.8cm]
+  (wv) at (13, 1.5) {$\times\,\bm{W}_V$};
 
 % Arrows from X to Q,K,V
 \foreach \nd in {wq, wk, wv} {
   \draw[arr] (7.5, 0.55) -- (\nd.south);
 }
 \node[lbl, bitblue] at (7, 2.05) {$\bm{Q}$};
-\node[lbl, bitgreen] at (10.5, 2.05) {$\bm{K}$};
-\node[lbl, bitorange] at (14, 2.05) {$\bm{V}$};
+\node[lbl, bitgreen] at (10, 2.05) {$\bm{K}$};
+\node[lbl, bitorange] at (13, 2.05) {$\bm{V}$};
 
 % Multi-head split hint
-\draw[bracel, bitgray, thick] (5.8, 2.2) -- (15.2, 2.2);
-\node[lbl, bitgray, above=3pt] at (10.5, 2.2)
+\draw[bracel, bitgray, thick] (5.9, 2.2) -- (14.1, 2.2);
+\node[lbl, bitgray, above=3pt] at (10, 2.2)
   {split into $h$ heads (each $d_k = d/h$)};
 
 % --- Dot product QK^T ---
-\node[smallcomp, fill=bitblue!8, draw=bitblue, minimum width=2.4cm]
-  (qk) at (8.75, 3.2) {$\bm{Q}\bm{K}^\top$};
-\draw[arr, bitblue] (7, 2.1) -- (7, 2.8) -| (qk.south west);
-\draw[arr, bitgreen] (10.5, 2.1) -- (10.5, 2.8) -| (qk.south east);
+\node[smallcomp, fill=bitblue!8, draw=bitblue, minimum width=2.2cm]
+  (qk) at (8.5, 3.2) {$\bm{Q}\bm{K}^\top$};
+% Q arrow: goes down from Q label, then routes left into qk
+\draw[arr, bitblue] (7, 2.1) -- (7, 2.85) -- (7.2, 2.85) -- (7.2, 3.2) -- (qk.west);
+% K arrow: goes down from K label, routes right and around to qk
+\draw[arr, bitgreen] (10, 2.1) -- (10, 2.85) -- (9.8, 2.85) -- (9.8, 3.2) -- (qk.east);
 
 % --- Scale ---
-\node[smallcomp, fill=bitgray!8, draw=bitgray, minimum width=2.4cm]
-  (scale) at (8.75, 4.2) {$\div\,\sqrt{d_k}$};
+\node[smallcomp, fill=bitgray!8, draw=bitgray, minimum width=2.2cm]
+  (scale) at (8.5, 4.2) {$\div\,\sqrt{d_k}$};
 \draw[arr] (qk) -- (scale);
 
-% --- Softmax (with small curve) ---
-\node[smallcomp, fill=bitorange!8, draw=bitorange, minimum width=2.4cm]
-  (sfm) at (8.75, 5.2) {softmax};
+% --- Softmax ---
+\node[smallcomp, fill=bitorange!8, draw=bitorange, minimum width=2.2cm]
+  (sfm) at (8.5, 5.2) {softmax};
 \draw[arr] (scale) -- (sfm);
 
-% Tiny softmax curve
-\begin{scope}[shift={(10.5, 5.05)}, scale=0.3]
-  \draw[bitorange, thick, smooth] plot[domain=-2:2, samples=30]
+% Softmax mini-figure inset (clean boxed curve)
+\node[minicurve, anchor=west] (sfmcurve) at (9.8, 5.2) {};
+\begin{scope}[shift={(10.2, 5.0)}, scale=0.18]
+  \draw[bitorange, thick, smooth] plot[domain=-2:2, samples=20]
     ({\x}, {1/(1+exp(-3*\x))});
-  \draw[gray, thin] (-2, 0) -- (2, 0);
+  \draw[gray!50, thin] (-2, 0) -- (2, 0);
 \end{scope}
 
 % --- Value aggregation ---
-\node[smallcomp, fill=bitorange!8, draw=bitorange, minimum width=2.4cm]
-  (agg) at (11.75, 5.2) {$\times\,\bm{V}$};
+\node[smallcomp, fill=bitorange!8, draw=bitorange, minimum width=2.2cm]
+  (agg) at (11.5, 5.2) {$\times\,\bm{V}$};
 \draw[arr] (sfm) -- (agg);
-\draw[arr, bitorange] (14, 2.1) -- (14, 4.8) -| (agg.south);
+% V arrow: route from V label down the right side, then left to agg bottom
+\draw[arr, bitorange] (13, 2.1) -- (13, 4.6) -- (11.5, 4.6) -- (agg.south);
 
 % --- Multi-head dots ---
-\node[font=\scriptsize, bitgray] at (15.5, 3.6) {$\times h$};
-\node[font=\scriptsize, bitgray] at (15.5, 3.0) {heads};
-\draw[bitgray, thick, dotted] (14.8, 2.5) -- (14.8, 5.6);
-\node[font=\large, bitgray] at (16.2, 4.2) {$\cdots$};
+\node[font=\scriptsize, bitgray] at (14.5, 3.6) {$\times h$};
+\node[font=\scriptsize, bitgray] at (14.5, 3.0) {heads};
+\draw[bitgray, thick, dotted] (13.9, 2.5) -- (13.9, 5.6);
+\node[font=\large, bitgray] at (15.2, 4.2) {$\cdots$};
 
 % Concat
-\node[smallcomp, fill=bitgray!8, draw=bitgray, minimum width=2.0cm]
-  (concat) at (11.75, 6.2) {concat};
+\node[smallcomp, fill=bitgray!8, draw=bitgray, minimum width=1.8cm]
+  (concat) at (11.5, 6.2) {concat};
 \draw[arr] (agg) -- (concat);
 
 % Output projection W_O
-\node[smallcomp, fill=bitblue!10, draw=bitblue, minimum width=2.4cm]
-  (wo) at (11.75, 7.1) {$\times\,\bm{W}_O$};
+\node[smallcomp, fill=bitblue!10, draw=bitblue, minimum width=2.2cm]
+  (wo) at (11.5, 7.1) {$\times\,\bm{W}_O$};
 \draw[arr] (concat) -- (wo);
 
 % --- Residual + LayerNorm 1 ---
-\node[plus] (add1) at (11.75, 8.0) {$+$};
+\node[plus] (add1) at (11.5, 8.0) {$+$};
 \draw[arr] (wo) -- (add1);
 
-% Skip connection from input
-\draw[skiparr] (5.5, 0.3) -- (5.5, 8.0) -- (add1.west);
-\node[lbl, bitgray, rotate=90, anchor=south] at (5.2, 4.2)
+% Skip connection from input (routed along left edge of block)
+\draw[skiparr] (5.3, 0.3) -- (5.3, 8.0) -- (add1.west);
+\node[lbl, bitgray, rotate=90, anchor=south] at (5.0, 4.2)
   {residual (skip)};
 
-\node[smallcomp, fill=bitgray!10, draw=bitgray, minimum width=2.8cm]
-  (ln1) at (11.75, 8.9) {Layer Norm};
+\node[smallcomp, fill=bitgray!10, draw=bitgray, minimum width=2.6cm]
+  (ln1) at (11.5, 8.9) {Layer Norm};
 \draw[arr] (add1) -- (ln1);
 
 % ========== MLP SUB-LAYER (top half) ==========
@@ -2067,135 +2072,129 @@ detail.
   {Feed-Forward Network (MLP)};
 
 % W1 expand
-\node[smallcomp, fill=bitorange!12, draw=bitorange, minimum width=2.4cm]
-  (mlpw1) at (9, 10.2) {$\times\,\bm{W}_1$ \textit{expand}};
+\node[smallcomp, fill=bitorange!12, draw=bitorange, minimum width=2.2cm]
+  (mlpw1) at (8.5, 10.2) {$\times\,\bm{W}_1$ \textit{expand}};
 \draw[arr] (ln1.north) -| (mlpw1.south);
-\node[lbl, bitorange] at (9, 10.7) {$d \to 4d$};
+\node[lbl, bitorange] at (8.5, 10.7) {$d \to 4d$};
 
 % Activation
-\node[smallcomp, fill=bitgreen!12, draw=bitgreen, minimum width=2.0cm]
-  (act) at (13, 10.2) {$\sigma$ (GELU)};
+\node[smallcomp, fill=bitgreen!12, draw=bitgreen, minimum width=1.8cm]
+  (act) at (12, 10.2) {$\sigma$ (GELU)};
 \draw[arr] (mlpw1) -- (act);
 
-% Tiny GELU curve
-\begin{scope}[shift={(14.7, 10.05)}, scale=0.28]
-  \draw[bitgreen, thick, smooth] plot[domain=-2.5:2.5, samples=30]
+% GELU mini-figure inset (clean boxed curve)
+\node[minicurve, anchor=west] (gelucurve) at (13.1, 10.2) {};
+\begin{scope}[shift={(13.5, 10.0)}, scale=0.18]
+  \draw[bitgreen, thick, smooth] plot[domain=-2.5:2.5, samples=20]
     ({\x}, {\x/(1+exp(-1.702*\x))});
-  \draw[gray, thin] (-2.5, 0) -- (2.5, 0);
+  \draw[gray!50, thin] (-2.5, 0) -- (2.5, 0);
 \end{scope}
 
 % W2 compress
-\node[smallcomp, fill=bitorange!12, draw=bitorange, minimum width=2.4cm]
-  (mlpw2) at (17, 10.2) {$\times\,\bm{W}_2$ \textit{compress}};
+\node[smallcomp, fill=bitorange!12, draw=bitorange, minimum width=2.2cm]
+  (mlpw2) at (15.5, 10.2) {$\times\,\bm{W}_2$ \textit{compress}};
 \draw[arr] (act) -- (mlpw2);
-\node[lbl, bitorange] at (17, 10.7) {$4d \to d$};
+\node[lbl, bitorange] at (15.5, 10.7) {$4d \to d$};
 
 % Neuron dots (abstract MLP representation)
 \foreach \i in {1,...,3} {
-  \node[neuron=bitorange] at ({8.2 + \i*0.35}, 11.3) {};
+  \node[neuron=bitorange] at ({7.8 + \i*0.35}, 11.3) {};
 }
-\node[font=\tiny, bitorange] at (10.2, 11.3) {$\cdots$};
-\foreach \i in {1,...,6} {
-  \node[neuron=bitorange] at ({11.0 + \i*0.35}, 11.3) {};
+\node[font=\tiny, bitorange] at (9.7, 11.3) {$\cdots$};
+\foreach \i in {1,...,5} {
+  \node[neuron=bitorange] at ({10.4 + \i*0.35}, 11.3) {};
 }
-\node[font=\tiny, bitorange] at (14.3, 11.3) {$\cdots$};
+\node[font=\tiny, bitorange] at (13.0, 11.3) {$\cdots$};
 \foreach \i in {1,...,3} {
-  \node[neuron=bitorange] at ({15.0 + \i*0.35}, 11.3) {};
+  \node[neuron=bitorange] at ({13.6 + \i*0.35}, 11.3) {};
 }
-\node[lbl, bitorange] at (12.5, 11.8) {$d$ $\to$ $4d$ $\to$ $d$ neurons};
+\node[lbl, bitorange] at (11.5, 11.8) {$d$ $\to$ $4d$ $\to$ $d$ neurons};
 
 % --- Residual + LayerNorm 2 ---
-\node[plus] (add2) at (17, 12.0) {$+$};
-\draw[arr] (mlpw2.north) -- (17, 11.5) -- (add2.south);
+\node[plus] (add2) at (15.5, 12.0) {$+$};
+\draw[arr] (mlpw2.north) -- (15.5, 11.5) -- (add2.south);
 
-% Skip connection from LN1
-\draw[skiparr] (5.8, 8.9) -- (5.8, 12.0) -- (add2.west);
-\node[lbl, bitgray, rotate=90, anchor=south] at (5.5, 10.5)
+% Skip connection from LN1 (routed along left side)
+\draw[skiparr] (5.6, 8.9) -- (5.6, 12.0) -- (add2.west);
+\node[lbl, bitgray, rotate=90, anchor=south] at (5.3, 10.5)
   {residual};
 
-\node[smallcomp, fill=bitgray!10, draw=bitgray, minimum width=2.8cm]
-  (ln2) at (17, 13.0) {Layer Norm};
+\node[smallcomp, fill=bitgray!10, draw=bitgray, minimum width=2.6cm]
+  (ln2) at (15.5, 13.0) {Layer Norm};
 \draw[arr] (add2) -- (ln2);
 
 % Output of block 1
-\draw[fatarr] (ln2.north) -- (17, 14.5);
+\draw[fatarr] (ln2.north) -- (15.5, 14.0);
 
 % ============================================================================
-% COLUMN 3: STACKED BLOCKS 2..N + OUTPUT HEAD (x = 22..27)
+% COLUMN 3: STACKED BLOCKS 2..N + OUTPUT HEAD (x = 20..24)
 % ============================================================================
 
 % Arrow from block 1 to block stack
-\draw[fatarr] (17, 14.5) -- (17, 15.2) -| (24, 14.5);
+\draw[fatarr] (15.5, 14.0) -- (15.5, 14.6) -| (22, 14.0);
 
 % Block 2
-\node[comp, fill=bitblue!8, draw=bitblue, minimum width=3.8cm]
-  (b2) at (24, 13.8) {Transformer Block 2};
-\draw[arr] (24, 14.5) -- (b2.north);
+\node[comp, fill=bitblue!8, draw=bitblue, minimum width=3.4cm]
+  (b2) at (22, 13.3) {Transformer Block 2};
+\draw[arr] (22, 14.0) -- (b2.north);
 
 % Dots
-\node[font=\sffamily, bitgray] (bdots) at (24, 12.6) {$\vdots$};
+\node[font=\sffamily, bitgray] (bdots) at (22, 12.2) {$\vdots$};
 \draw[arr] (b2.south) -- (bdots.north);
 
 % Block N
-\node[comp, fill=bitblue!8, draw=bitblue, minimum width=3.8cm]
-  (bn) at (24, 11.4) {Transformer Block $N$};
+\node[comp, fill=bitblue!8, draw=bitblue, minimum width=3.4cm]
+  (bn) at (22, 11.0) {Transformer Block $N$};
 \draw[arr] (bdots.south) -- (bn.north);
 
-% Brace for N blocks
-\draw[brace, thick, bitblue] (26.2, 14.2) -- (26.2, 11.1);
-\node[lbl, bitblue, anchor=west, text width=1.5cm] at (26.6, 12.65)
+% Brace for N blocks (placed to the right, within page bounds)
+\draw[brace, thick, bitblue] (23.9, 13.7) -- (23.9, 10.7);
+\node[lbl, bitblue, anchor=west, text width=1.4cm] at (24.2, 12.2)
   {$N$ layers\\(32--126)};
 
 % --- Final layer norm ---
-\node[comp, fill=bitgray!8, draw=bitgray, minimum width=3.8cm]
-  (finln) at (24, 9.8) {Final Layer Norm};
+\node[comp, fill=bitgray!8, draw=bitgray, minimum width=3.4cm]
+  (finln) at (22, 9.5) {Final Layer Norm};
 \draw[fatarr] (bn.south) -- (finln.north);
 
 % --- Output head ---
-\node[heading, bitgreen!80] at (24, 9.0) {Output Head};
+\node[heading, bitgreen!80] at (22, 8.7) {Output Head};
 
 % W_vocab projection
-\node[comp, fill=bitgreen!10, draw=bitgreen, minimum width=3.8cm]
-  (wvoc) at (24, 8.0) {$\times\,\bm{W}_{\text{vocab}}$};
+\node[comp, fill=bitgreen!10, draw=bitgreen, minimum width=3.4cm]
+  (wvoc) at (22, 7.8) {$\times\,\bm{W}_{\text{vocab}}$};
 \draw[arr] (finln.south) -- (wvoc.north);
-\node[lbl, bitgreen] at (24, 7.45) {$d \to V$ projection};
+\node[lbl, bitgreen] at (22, 7.25) {$d \to V$ projection};
 
 % Logits
-\node[comp, fill=bitgreen!6, draw=bitgreen, minimum width=3.8cm]
-  (logits) at (24, 6.4) {logits ($V$ raw scores)};
+\node[comp, fill=bitgreen!6, draw=bitgreen, minimum width=3.4cm]
+  (logits) at (22, 6.2) {logits ($V$ raw scores)};
 \draw[arr] (wvoc.south) -- (logits.north);
 
 % Softmax
-\node[comp, fill=bitorange!10, draw=bitorange, minimum width=3.8cm]
-  (outsm) at (24, 5.0) {softmax};
+\node[comp, fill=bitorange!10, draw=bitorange, minimum width=3.4cm]
+  (outsm) at (22, 5.0) {softmax};
 \draw[arr] (logits.south) -- (outsm.north);
 
-% Tiny softmax curve for output
-\begin{scope}[shift={(26.4, 4.85)}, scale=0.3]
-  \draw[bitorange, thick, smooth] plot[domain=-2:2, samples=30]
-    ({\x}, {1/(1+exp(-3*\x))});
-  \draw[gray, thin] (-2, 0) -- (2, 0);
-\end{scope}
-
 % Probabilities
-\node[comp, fill=bitorange!6, draw=bitorange, minimum width=3.8cm]
-  (probs) at (24, 3.6) {probabilities ($\sum\!=\!1$)};
+\node[comp, fill=bitorange!6, draw=bitorange, minimum width=3.4cm]
+  (probs) at (22, 3.8) {probabilities ($\sum\!=\!1$)};
 \draw[arr] (outsm.south) -- (probs.north);
 
 % Probability bar chart (mini)
-\begin{scope}[shift={(22.1, 2.0)}]
+\begin{scope}[shift={(20.3, 2.4)}]
   \foreach \i/\h/\c in {0/0.6/bitorange, 1/0.22/bitorange!60,
     2/0.08/bitorange!40, 3/0.04/bitorange!25, 4/0.02/bitorange!15} {
-    \fill[\c] ({\i*0.42}, 0) rectangle ({\i*0.42+0.32}, {\h*1.5});
+    \fill[\c] ({\i*0.38}, 0) rectangle ({\i*0.38+0.28}, {\h*1.3});
   }
-  \node[font=\tiny, bitorange] at (2.5, 0.5) {$\cdots$};
-  \node[lbl, bitorange] at (1.5, -0.3) {$V$ tokens};
+  \node[font=\tiny, bitorange] at (2.2, 0.4) {$\cdots$};
+  \node[lbl, bitorange] at (1.3, -0.3) {$V$ tokens};
 \end{scope}
 
 % Sampled token
-\node[comp, fill=bitgreen!15, draw=bitgreen, minimum width=3.8cm]
-  (sample) at (24, 0.8) {sample $\to$ next token};
-\draw[arr] (probs.south) -- (24, 2.9) -- (24, 1.15);
+\node[comp, fill=bitgreen!15, draw=bitgreen, minimum width=3.4cm]
+  (sample) at (22, 1.0) {sample $\to$ next token};
+\draw[arr] (probs.south) -- (22, 3.3) -- (22, 1.35);
 
 % ============================================================================
 % AUTOREGRESSIVE LOOP ARROW
@@ -2203,8 +2202,8 @@ detail.
 
 % Arrow from sampled token looping back to tokeniser input
 \draw[fatarr, bitgreen!70!black, rounded corners=8pt]
-  (24, 0.45) -- (24, -1.6) -- (2, -1.6) -- (2, -0.35);
-\node[lbl, bitgreen!70!black, fill=white, inner sep=2pt] at (13, -1.6)
+  (22, 0.65) -- (22, -1.4) -- (2, -1.4) -- (2, -0.35);
+\node[lbl, bitgreen!70!black, fill=white, inner sep=2pt] at (12, -1.4)
   {autoregressive loop: append token, repeat};
 
 % ============================================================================
@@ -2221,7 +2220,7 @@ detail.
 % ============================================================================
 
 \node[font=\small\sffamily\bfseries, bitblue!80!black, anchor=north west]
-  at (0, 15.3) {The Complete LLM Architecture: End-to-End Pipeline};
+  at (0, 14.8) {The Complete LLM Architecture: End-to-End Pipeline};
 
 % Dimension annotations
 \node[lbl, bitgray, text width=3cm, align=center] at (2, 5.8)

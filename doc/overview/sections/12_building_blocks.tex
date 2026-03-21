@@ -1,0 +1,1272 @@
+% ============================================================================
+\section{The Building-Block Toolkit}
+\label{sec:building-blocks}
+% ============================================================================
+
+Throughout this article, we have introduced dozens of neural network
+components---from XNOR gates to attention heads, from popcount to
+B-splines. Each appeared in the context of a particular paradigm or
+architecture. This final chapter steps back and presents all of them
+as \emph{standardised engineering building blocks}: interchangeable
+parts in a design toolkit, each with measurable characteristics that
+an engineer can compare and compose.
+
+% --- Custom environment for spec cards ---
+\newtcolorbox{speccard}[1][]{
+  enhanced, breakable,
+  colback=lightbg, colframe=bitgray!60,
+  fonttitle=\bfseries\sffamily,
+  left=4pt, right=4pt, top=4pt, bottom=4pt,
+  boxrule=0.6pt,
+  #1
+}
+
+% --- Star rating command ---
+\newcommand{\starmark}[1]{%
+  \ifnum#1=1 {\textcolor{bitorange}{\raisebox{-0.1ex}{$\bigstar$}}}{\textcolor{bitgray!30}{\raisebox{-0.1ex}{$\bigstar$}}}{\textcolor{bitgray!30}{\raisebox{-0.1ex}{$\bigstar$}}}%
+  \fi
+  \ifnum#1=2 {\textcolor{bitorange}{\raisebox{-0.1ex}{$\bigstar$}}}{\textcolor{bitorange}{\raisebox{-0.1ex}{$\bigstar$}}}{\textcolor{bitgray!30}{\raisebox{-0.1ex}{$\bigstar$}}}%
+  \fi
+  \ifnum#1=3 {\textcolor{bitgreen}{\raisebox{-0.1ex}{$\bigstar$}}}{\textcolor{bitgreen}{\raisebox{-0.1ex}{$\bigstar$}}}{\textcolor{bitgreen}{\raisebox{-0.1ex}{$\bigstar$}}}%
+  \fi
+}
+
+% ----------------------------------------------------------------------------
+\subsection{The Toolkit Approach}
+\label{sec:toolkit-approach}
+% ----------------------------------------------------------------------------
+
+Every neural architecture---whether a three-layer MNIST classifier or
+a 70-billion-parameter language model---is assembled from a finite set
+of primitive operations. The specific combination defines the
+architecture; the primitives themselves are reusable.
+
+\begin{analogy}
+Think of building a house. You do not invent new materials for each
+room. You select from a catalogue---bricks, beams, pipes,
+wires---each with a known cost, load capacity, and installation
+method. Neural architecture design works the same way: you choose
+components with known computational cost, memory footprint, and
+precision requirements, then compose them for your task.
+\end{analogy}
+
+Each building block in this chapter receives a \emph{spec card} with
+a consistent set of characteristics:
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{Input and output} --- what goes in, what comes out.
+  \item \textbf{Core operation} --- the key equation or algorithm.
+  \item \textbf{Computational cost} --- FLOPs per element or token.
+  \item \textbf{Memory footprint} --- parameters and runtime state.
+  \item \textbf{Precision requirements} --- minimum numerical precision.
+  \item \textbf{Bitwise amenability} --- rated from \starmark{1} to
+    \starmark{3}, indicating how naturally the block maps to bitwise
+    or integer-only hardware.
+  \item \textbf{Strengths and limitations} --- concise trade-off summary.
+  \item \textbf{Used in} --- which architectures employ this block.
+\end{itemize}
+
+The same block can serve different roles in different architectures.
+A dense linear projection appears inside a transformer's attention
+head, inside a Mamba block's input path, and inside a simple MLP
+classifier. Understanding the block in isolation lets you reason about
+any architecture that uses it.
+
+% ============================================================================
+% CATEGORY 1: SEQUENCE MIXERS
+% ============================================================================
+
+% ----------------------------------------------------------------------------
+\subsection{Sequence Mixers}
+\label{sec:bb-sequence-mixers}
+% ----------------------------------------------------------------------------
+
+Sequence mixers are the components that let tokens interact with each
+other. They answer the question: ``how does position~$t$ learn about
+positions~$1, \ldots, t{-}1$?'' This is the defining architectural
+choice in any sequence model.
+
+% --- Block 1: Scaled Dot-Product Attention ---
+\begin{speccard}[title={\textcolor{bitblue}{Block 1: Scaled Dot-Product Attention}
+  \hfill\normalfont\small\textit{Introduced in \cref{sec:self-attention}}}]
+
+\textbf{One-line description.}\quad
+Every token computes a relevance score against every other token, then
+reads a weighted mixture of their values.
+
+\smallskip
+\begin{tabular}{@{}l@{\hskip 1.2em}p{10cm}@{}}
+\textbf{Input} & Three matrices $Q, K, V \in \mathbb{R}^{n \times d}$
+  (queries, keys, values) \\
+\textbf{Output} & $\text{Attn}(Q,K,V) \in \mathbb{R}^{n \times d}$ \\
+\textbf{Core operation} &
+  $\text{softmax}\!\bigl(QK^\top / \sqrt{d}\bigr) \, V$ \\
+\textbf{Cost} & $O(n^2 d)$ FLOPs per layer \\
+\textbf{Memory} & $O(n^2)$ for the attention matrix; KV cache grows
+  as $O(n \cdot d)$ during autoregressive inference \\
+\textbf{Precision} & Softmax requires high precision
+  (\cref{sec:softmax-problem}); INT8 QKV projections are possible \\
+\textbf{Bitwise} & \starmark{1} --- the softmax and $QK^\top$
+  products resist binarisation; integer approximations exist but are
+  lossy \\
+\end{tabular}
+
+\smallskip
+\textbf{Strengths:}
+(1)~Captures arbitrary-distance dependencies in a single layer.
+(2)~Fully parallelisable during training.
+
+\textbf{Limitations:}
+(1)~Quadratic cost in sequence length.
+(2)~KV cache grows linearly, straining memory for long contexts.
+
+\textbf{Used in:} Transformer, GPT, LLaMA, hybrid architectures (Jamba).
+\end{speccard}
+
+% --- Block 2: Linear Attention ---
+\begin{speccard}[title={\textcolor{bitblue}{Block 2: Linear Attention}
+  \hfill\normalfont\small\textit{Introduced in \cref{sec:alt-architectures}}}]
+
+\textbf{One-line description.}\quad
+Drops the softmax from attention, using a kernel trick or simple decay
+to avoid the $n^2$ cost.
+
+\smallskip
+\begin{tabular}{@{}l@{\hskip 1.2em}p{10cm}@{}}
+\textbf{Input} & $Q, K, V \in \mathbb{R}^{n \times d}$ \\
+\textbf{Output} & $\text{LinAttn}(Q,K,V) \in \mathbb{R}^{n \times d}$ \\
+\textbf{Core operation} &
+  $\phi(Q)\bigl(\phi(K)^\top V\bigr)$ where $\phi$ is a feature map;
+  compute $K^\top V$ first to avoid forming the $n \times n$ matrix \\
+\textbf{Cost} & $O(n d^2)$ FLOPs (linear in sequence length) \\
+\textbf{Memory} & $O(d^2)$ for the running $K^\top V$ state \\
+\textbf{Precision} & Feature map $\phi$ can be simple (ELU+1, ReLU);
+  INT8 feasible \\
+\textbf{Bitwise} & \starmark{2} --- no softmax removes the hardest
+  obstacle; accumulations can use integer arithmetic \\
+\end{tabular}
+
+\smallskip
+\textbf{Strengths:}
+(1)~Linear-time training and constant-memory inference.
+(2)~Drop-in replacement for standard attention in many cases.
+
+\textbf{Limitations:}
+(1)~Lower recall accuracy on tasks requiring precise token retrieval.
+(2)~Feature map choice significantly affects quality.
+
+\textbf{Used in:} Linear Transformer, hybrid architectures, RWKV (related).
+\end{speccard}
+
+% --- Block 3: SSM Recurrence ---
+\begin{speccard}[title={\textcolor{bitblue}{Block 3: SSM Recurrence (Mamba)}
+  \hfill\normalfont\small\textit{Introduced in \cref{sec:mamba}}}]
+
+\textbf{One-line description.}\quad
+Maintains a fixed-size hidden state that is updated per token via a
+learned linear recurrence.
+
+\smallskip
+\begin{tabular}{@{}l@{\hskip 1.2em}p{10cm}@{}}
+\textbf{Input} & Token embedding $x_t \in \mathbb{R}^d$ \\
+\textbf{Output} & Contextualised output $y_t \in \mathbb{R}^d$ \\
+\textbf{Core operation} &
+  $\mathbf{h}_t = \bar{\mathbf{A}} \mathbf{h}_{t-1} + \bar{\mathbf{B}} x_t$,
+  \quad $y_t = \mathbf{C} \mathbf{h}_t$
+  (\cref{eq:ssm-recurrence}) \\
+\textbf{Cost} & $O(n d N)$ training (parallel scan); $O(dN)$ per
+  token at inference \\
+\textbf{Memory} & Hidden state $\mathbf{h} \in \mathbb{R}^{d \times N}$
+  (fixed, independent of sequence length) \\
+\textbf{Precision} & Discretised $\bar{\mathbf{A}}$ can be quantised;
+  INT8 demonstrated \\
+\textbf{Bitwise} & \starmark{2} --- multiply-accumulate recurrence maps
+  to fixed-point; input-dependent gating needs moderate precision \\
+\end{tabular}
+
+\smallskip
+\textbf{Strengths:}
+(1)~Constant memory at inference regardless of sequence length.
+(2)~Hardware-friendly: no dynamic memory allocation.
+
+\textbf{Limitations:}
+(1)~Cannot perfectly recall specific tokens from far in the past.
+(2)~Selective scan mechanism adds complexity vs.\ simple RNNs.
+
+\textbf{Used in:} Mamba, Mamba-2, Jamba (hybrid).
+\end{speccard}
+
+% --- Block 4: WKV Linear RNN ---
+\begin{speccard}[title={\textcolor{bitblue}{Block 4: WKV Linear RNN (RWKV)}
+  \hfill\normalfont\small\textit{Introduced in \cref{sec:rwkv}}}]
+
+\textbf{One-line description.}\quad
+Exponentially-decaying weighted sum of key-value pairs, computable as
+either a parallel scan or a recurrence.
+
+\smallskip
+\begin{tabular}{@{}l@{\hskip 1.2em}p{10cm}@{}}
+\textbf{Input} & Key $k_t$, value $v_t$, decay $w$, bonus $u$ per channel \\
+\textbf{Output} & Contextualised output $\text{wkv}_t$
+  (\cref{eq:rwkv-wkv}) \\
+\textbf{Core operation} &
+  Weighted sum with exponential decay:
+  $\text{wkv}_t = \sum_i e^{-(t-i)w + k_i} v_i \big/ \sum_i e^{-(t-i)w + k_i}$ \\
+\textbf{Cost} & $O(nd)$ training; $O(d)$ per token at inference \\
+\textbf{Memory} & Fixed-size state per channel (numerator + denominator
+  accumulators) \\
+\textbf{Precision} & 3-bit quantisation demonstrated with
+  $<$1\% accuracy loss \\
+\textbf{Bitwise} & \starmark{2} --- exponential decay resembles a
+  digital low-pass filter implementable with bit-shifts; INT8 NEON
+  kernels exist \\
+\end{tabular}
+
+\smallskip
+\textbf{Strengths:}
+(1)~Constant-memory, constant-time inference per token.
+(2)~Most aggressively quantisable of all sequence mixers.
+
+\textbf{Limitations:}
+(1)~Exponential decay may lose distant information faster than
+attention.
+(2)~Less mature ecosystem than transformers.
+
+\textbf{Used in:} RWKV-4 through RWKV-7.
+\end{speccard}
+
+% --- Block 5: 1D Convolution ---
+\begin{speccard}[title={\textcolor{bitblue}{Block 5: 1D Convolution}
+  \hfill\normalfont\small\textit{Introduced in \cref{sec:mamba}}}]
+
+\textbf{One-line description.}\quad
+A fixed-width sliding window that mixes a token with its immediate
+neighbours.
+
+\smallskip
+\begin{tabular}{@{}l@{\hskip 1.2em}p{10cm}@{}}
+\textbf{Input} & Sequence $x \in \mathbb{R}^{n \times d}$ \\
+\textbf{Output} & Locally-mixed sequence $y \in \mathbb{R}^{n \times d}$;
+  each $y_t$ depends on $x_{t-k+1}, \ldots, x_t$ \\
+\textbf{Core operation} &
+  $y_t = \sum_{i=0}^{k-1} w_i \, x_{t-i}$ (depthwise, per channel) \\
+\textbf{Cost} & $O(ndk)$ FLOPs, where $k$ is kernel width
+  (typically 3--7) \\
+\textbf{Memory} & $k \cdot d$ parameters; $O(kd)$ buffer for causal mode \\
+\textbf{Precision} & Standard quantisation applies; INT8 is routine \\
+\textbf{Bitwise} & \starmark{2} --- small fixed-point multiply-accumulate;
+  with ternary kernels, reduces to additions \\
+\end{tabular}
+
+\smallskip
+\textbf{Strengths:}
+(1)~Very fast and cache-friendly due to local access pattern.
+(2)~Provides positional inductive bias without explicit position
+encodings.
+
+\textbf{Limitations:}
+(1)~Cannot capture dependencies beyond the kernel width.
+(2)~Always used as a preprocessing step, never as a standalone mixer.
+
+\textbf{Used in:} Mamba (input projection), ConvNeXt, many hybrid
+architectures.
+\end{speccard}
+
+% --- Category comparison table ---
+\begin{table}[htbp]
+\centering
+\caption{Sequence mixer comparison.}
+\label{tab:bb-sequence-mixers}
+\small
+\begin{tabularx}{\textwidth}{@{}l c c c c X@{}}
+\toprule
+\textbf{Block} & \textbf{Training} & \textbf{Inference} &
+  \textbf{Memory} & \textbf{Bitwise} & \textbf{Best for} \\
+\midrule
+Attention     & $O(n^2 d)$ & $O(n^2 d)$ & $O(n \cdot d)$ cache &
+  \starmark{1} & Tasks requiring precise recall \\
+Linear attn   & $O(n d^2)$ & $O(d^2)$ & $O(d^2)$ state &
+  \starmark{2} & Long sequences, approximate recall \\
+SSM (Mamba)   & $O(ndN)$ & $O(dN)$ & $O(dN)$ state &
+  \starmark{2} & Long sequences, streaming \\
+WKV (RWKV)    & $O(nd)$ & $O(d)$ & $O(d)$ state &
+  \starmark{2} & Edge deployment, extreme quantisation \\
+Conv1d        & $O(ndk)$ & $O(dk)$ & $O(dk)$ buffer &
+  \starmark{2} & Local context, preprocessing \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+
+% ============================================================================
+% CATEGORY 2: LINEAR TRANSFORMS
+% ============================================================================
+
+% ----------------------------------------------------------------------------
+\subsection{Linear Transforms}
+\label{sec:bb-linear-transforms}
+% ----------------------------------------------------------------------------
+
+Linear transforms---matrix multiplications---are the workhorses of
+neural networks. They account for the vast majority of computation in
+any model. The three blocks in this category differ only in the
+\emph{precision} of the weight matrix, but that difference has
+enormous consequences for hardware efficiency.
+
+% --- Block 6: Dense Linear Projection ---
+\begin{speccard}[title={\textcolor{bitblue}{Block 6: Dense Linear Projection}
+  \hfill\normalfont\small\textit{Introduced in \cref{sec:traditional-neuron}}}]
+
+\textbf{One-line description.}\quad
+Standard full-precision matrix multiplication: the foundational
+multiply-accumulate operation.
+
+\smallskip
+\begin{tabular}{@{}l@{\hskip 1.2em}p{10cm}@{}}
+\textbf{Input} & Vector $\mathbf{x} \in \mathbb{R}^{d_\text{in}}$ \\
+\textbf{Output} & $\mathbf{y} = \mathbf{W}\mathbf{x} + \mathbf{b}
+  \in \mathbb{R}^{d_\text{out}}$ \\
+\textbf{Core operation} &
+  $y_j = \sum_{i} W_{ji} \, x_i + b_j$ (multiply-accumulate) \\
+\textbf{Cost} & $2 \, d_\text{in} \cdot d_\text{out}$ FLOPs
+  (one multiply + one add per weight) \\
+\textbf{Memory} & $d_\text{in} \times d_\text{out}$ parameters
+  at 16 or 32 bits each \\
+\textbf{Precision} & FP16/BF16 standard; INT8 quantisation routine \\
+\textbf{Bitwise} & \starmark{1} --- full-precision multiplications
+  are the operation this article seeks to eliminate \\
+\end{tabular}
+
+\smallskip
+\textbf{Strengths:}
+(1)~Maximum representational capacity per parameter.
+(2)~Extensively optimised on GPUs (cuBLAS, Tensor Cores).
+
+\textbf{Limitations:}
+(1)~Dominates energy consumption and silicon area.
+(2)~Requires specialised hardware (GPU/TPU) for competitive throughput.
+
+\textbf{Used in:} All conventional neural networks; baseline for
+comparison.
+\end{speccard}
+
+% --- Block 7: Ternary Linear Projection ---
+\begin{speccard}[title={\textcolor{bitblue}{Block 7: Ternary Linear Projection}
+  \hfill\normalfont\small\textit{Introduced in \cref{sec:bnn}}}]
+
+\textbf{One-line description.}\quad
+Weights constrained to $\{-1, 0, +1\}$; multiplication becomes
+conditional addition and subtraction.
+
+\smallskip
+\begin{tabular}{@{}l@{\hskip 1.2em}p{10cm}@{}}
+\textbf{Input} & Vector $\mathbf{x} \in \mathbb{R}^{d_\text{in}}$
+  (activations may remain multi-bit) \\
+\textbf{Output} & $\mathbf{y} \in \mathbb{R}^{d_\text{out}}$ \\
+\textbf{Core operation} &
+  $y_j = \sum_{i:\,W_{ji}=+1} x_i - \sum_{i:\,W_{ji}=-1} x_i$
+  (add/subtract only) \\
+\textbf{Cost} & $\sim\!d_\text{in} \cdot d_\text{out}$ additions
+  (roughly half the FLOPs, no multiplies) \\
+\textbf{Memory} & 1.58 bits per weight (10$\times$ reduction
+  vs.\ FP16) \\
+\textbf{Precision} & Weights are 1.58-bit; activations typically
+  INT8 \\
+\textbf{Bitwise} & \starmark{2} --- eliminates multiplier circuits;
+  accumulations still require multi-bit integer adders \\
+\end{tabular}
+
+\smallskip
+\textbf{Strengths:}
+(1)~Proven at 3B+ parameter scale (BitNet b1.58).
+(2)~Dramatic reduction in weight storage and energy per operation.
+
+\textbf{Limitations:}
+(1)~Training requires full-precision shadow weights and the
+  straight-through estimator.
+(2)~Activations remain multi-bit, so data movement is only partially
+  reduced.
+
+\textbf{Used in:} BitNet b1.58, ternary-weight CNNs, TWN.
+\end{speccard}
+
+% --- Block 8: Binary Linear Projection ---
+\begin{speccard}[title={\textcolor{bitblue}{Block 8: Binary Linear Projection}
+  \hfill\normalfont\small\textit{Introduced in \cref{sec:bnn}}}]
+
+\textbf{One-line description.}\quad
+Both weights and activations binarised to $\{-1, +1\}$;
+multiplication becomes XNOR and accumulation becomes popcount.
+
+\smallskip
+\begin{tabular}{@{}l@{\hskip 1.2em}p{10cm}@{}}
+\textbf{Input} & Binary vector $\mathbf{x}_b \in \{-1,+1\}^{d_\text{in}}$
+  (packed as bits) \\
+\textbf{Output} & Integer $y_j = d_\text{in} - 2 \cdot
+  \text{popcount}(\mathbf{w}_j \oplus \mathbf{x}_b)$ \\
+\textbf{Core operation} &
+  XNOR + popcount (\cref{sec:bnn}) \\
+\textbf{Cost} & $d_\text{in} \cdot d_\text{out} / 64$ XNOR
+  instructions on a 64-bit CPU + popcount \\
+\textbf{Memory} & 1 bit per weight (32$\times$ reduction vs.\ FP32) \\
+\textbf{Precision} & Fully binary (1-bit weights and activations) \\
+\textbf{Bitwise} & \starmark{3} --- the purest bitwise linear
+  transform; uses only logic gates and bit counting \\
+\end{tabular}
+
+\smallskip
+\textbf{Strengths:}
+(1)~Up to 58$\times$ speedup on CPU (XNOR-Net).
+(2)~Minimal memory: entire model can fit in L1/L2 cache for small
+  networks.
+
+\textbf{Limitations:}
+(1)~Significant accuracy loss on complex tasks due to extreme
+  quantisation.
+(2)~Batch normalisation between layers typically remains
+  floating-point.
+
+\textbf{Used in:} XNOR-Net, BinaryConnect, BNN for MNIST/CIFAR.
+\end{speccard}
+
+% --- Category comparison table ---
+\begin{table}[htbp]
+\centering
+\caption{Linear transform comparison.}
+\label{tab:bb-linear-transforms}
+\small
+\begin{tabularx}{\textwidth}{@{}l c c c c X@{}}
+\toprule
+\textbf{Block} & \textbf{Bits/weight} & \textbf{Multiply?} &
+  \textbf{Cost reduction} & \textbf{Bitwise} & \textbf{Trade-off} \\
+\midrule
+Dense (FP16) & 16 & Yes & 1$\times$ (baseline) & \starmark{1} &
+  Maximum accuracy \\
+Ternary      & 1.58 & No (add/sub) & $\sim$2$\times$ & \starmark{2} &
+  Near-lossless at scale \\
+Binary       & 1    & No (XNOR) & $\sim$58$\times$ & \starmark{3} &
+  Accuracy loss on hard tasks \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+
+% ============================================================================
+% CATEGORY 3: NONLINEAR ACTIVATIONS
+% ============================================================================
+
+% ----------------------------------------------------------------------------
+\subsection{Nonlinear Activations}
+\label{sec:bb-activations}
+% ----------------------------------------------------------------------------
+
+Without nonlinearities, stacking linear layers would collapse into a
+single matrix multiplication. Activations introduce the nonlinearity
+that gives neural networks their expressive power. The blocks here
+range from smooth differentiable functions to precomputed tables.
+
+% --- Block 9: Smooth Activations ---
+\begin{speccard}[title={\textcolor{bitblue}{Block 9: Smooth Activations (GELU, SiLU, Sigmoid)}
+  \hfill\normalfont\small\textit{Introduced in \cref{sec:ffn}}}]
+
+\textbf{One-line description.}\quad
+Differentiable element-wise nonlinearities with smooth gradients
+everywhere.
+
+\smallskip
+\begin{tabular}{@{}l@{\hskip 1.2em}p{10cm}@{}}
+\textbf{Input} & Scalar or vector $x \in \mathbb{R}$ \\
+\textbf{Output} & $\sigma(x)$, $\text{GELU}(x) = x \cdot \Phi(x)$,
+  or $\text{SiLU}(x) = x \cdot \sigma(x)$ \\
+\textbf{Core operation} &
+  Exponential, error function, or their polynomial approximations \\
+\textbf{Cost} & $O(1)$ per element, but involves transcendental
+  functions \\
+\textbf{Memory} & Zero learnable parameters \\
+\textbf{Precision} & FP16 typical; polynomial approximations enable
+  INT8 \\
+\textbf{Bitwise} & \starmark{1} --- transcendental functions
+  (exponentials, erf) have no natural bitwise form \\
+\end{tabular}
+
+\smallskip
+\textbf{Strengths:}
+(1)~Smooth gradients aid training stability (no dead neurons).
+(2)~GELU/SiLU are the current standard for transformer MLP blocks.
+
+\textbf{Limitations:}
+(1)~Require floating-point or high-precision polynomial evaluation.
+(2)~Cannot be decomposed into logic operations without approximation.
+
+\textbf{Used in:} Transformers (GPT, LLaMA), Mamba, most modern
+architectures.
+\end{speccard}
+
+% --- Block 10: Hard Activations ---
+\begin{speccard}[title={\textcolor{bitblue}{Block 10: Hard Activations (ReLU, Sign, Step)}
+  \hfill\normalfont\small\textit{Introduced in \cref{sec:traditional-neuron}, \cref{sec:bnn}}}]
+
+\textbf{One-line description.}\quad
+Piecewise-linear or piecewise-constant functions with trivial
+computation but non-differentiable points.
+
+\smallskip
+\begin{tabular}{@{}l@{\hskip 1.2em}p{10cm}@{}}
+\textbf{Input} & Scalar $x \in \mathbb{R}$ \\
+\textbf{Output} & $\text{ReLU}(x) = \max(0, x)$; \
+  $\text{sign}(x) \in \{-1, +1\}$; \
+  $\text{step}(x) \in \{0, 1\}$ \\
+\textbf{Core operation} &
+  Comparison with zero (single integer compare or bit test) \\
+\textbf{Cost} & $O(1)$ per element --- a single comparison \\
+\textbf{Memory} & Zero learnable parameters \\
+\textbf{Precision} & Binary output for sign/step; ReLU preserves
+  input precision \\
+\textbf{Bitwise} & \starmark{3} --- sign and step are pure bit
+  operations (test the sign bit); ReLU is one comparison + mask \\
+\end{tabular}
+
+\smallskip
+\textbf{Strengths:}
+(1)~Computationally trivial: no arithmetic beyond comparison.
+(2)~Sign function enables fully binary data paths.
+
+\textbf{Limitations:}
+(1)~Non-differentiable at zero --- requires the straight-through
+  estimator (STE) for training.
+(2)~Sign/step destroy magnitude information, limiting accuracy.
+
+\textbf{Used in:} BNNs (sign), classical MLPs (ReLU), Tsetlin
+Machines (step/threshold).
+\end{speccard}
+
+% --- Block 11: Softmax ---
+\begin{speccard}[title={\textcolor{bitblue}{Block 11: Softmax}
+  \hfill\normalfont\small\textit{Introduced in \cref{sec:self-attention}}}]
+
+\textbf{One-line description.}\quad
+Converts a vector of real-valued scores into a probability
+distribution via normalised exponentials.
+
+\smallskip
+\begin{tabular}{@{}l@{\hskip 1.2em}p{10cm}@{}}
+\textbf{Input} & Logit vector $\mathbf{z} \in \mathbb{R}^n$ \\
+\textbf{Output} & Probability vector $\mathbf{p} \in [0,1]^n$,
+  $\sum_i p_i = 1$ \\
+\textbf{Core operation} &
+  $p_i = e^{z_i} / \sum_j e^{z_j}$ \\
+\textbf{Cost} & $O(n)$ exponentials + $O(n)$ divisions \\
+\textbf{Memory} & Zero parameters \\
+\textbf{Precision} & Requires high dynamic range for the exponential;
+  FP16 minimum, or integer approximations
+  (\cref{sec:softmax-problem}) \\
+\textbf{Bitwise} & \starmark{1} --- exponential and division are the
+  hardest operations to approximate with bitwise logic; bit-shift
+  approximations (Shiftmax) trade accuracy for efficiency \\
+\end{tabular}
+
+\smallskip
+\textbf{Strengths:}
+(1)~Produces a valid probability distribution (sums to 1).
+(2)~Well-understood numerically (log-sum-exp trick for stability).
+
+\textbf{Limitations:}
+(1)~Requires two passes over the data (compute max, then normalise).
+(2)~The single hardest operation to make bitwise in a transformer.
+
+\textbf{Used in:} Transformer attention, output layer of classifiers,
+MoE routing.
+\end{speccard}
+
+% --- Block 12: LUT-Compiled Activation ---
+\begin{speccard}[title={\textcolor{bitblue}{Block 12: LUT-Compiled Activation}
+  \hfill\normalfont\small\textit{Introduced in \cref{sec:lut-compilation}}}]
+
+\textbf{One-line description.}\quad
+Any learned or fixed activation function precomputed into a lookup
+table --- pure memory access replaces all arithmetic.
+
+\smallskip
+\begin{tabular}{@{}l@{\hskip 1.2em}p{10cm}@{}}
+\textbf{Input} & Quantised scalar $x \in \{0, 1, \ldots, 2^b - 1\}$
+  ($b$-bit integer) \\
+\textbf{Output} & Table entry $\text{LUT}[x]$ \\
+\textbf{Core operation} &
+  Single indexed memory read: \texttt{output = table[input]} \\
+\textbf{Cost} & $O(1)$ --- one memory access per element \\
+\textbf{Memory} & $2^b$ entries (256 bytes for INT8 input, 1-byte
+  output) \\
+\textbf{Precision} & Input quantised to $b$ bits; output precision is
+  arbitrary \\
+\textbf{Bitwise} & \starmark{3} --- no arithmetic whatsoever; the
+  ``function'' is stored data, not computed \\
+\end{tabular}
+
+\smallskip
+\textbf{Strengths:}
+(1)~Can represent \emph{any} univariate function with zero inference
+  computation.
+(2)~Each layer can have a different learned activation shape.
+
+\textbf{Limitations:}
+(1)~Only works for univariate (one-input) functions; multi-input LUTs
+  grow exponentially ($2^{b \cdot k}$ for $k$ inputs).
+(2)~Training requires a differentiable surrogate (B-spline or
+  piecewise linear) before compilation.
+
+\textbf{Used in:} KAN-compiled models, ULEEN, PolyLUT/NeuraLUT,
+proposed bitwise transformers.
+\end{speccard}
+
+% --- Category comparison table ---
+\begin{table}[htbp]
+\centering
+\caption{Nonlinear activation comparison.}
+\label{tab:bb-activations}
+\small
+\begin{tabularx}{\textwidth}{@{}l c c c c X@{}}
+\toprule
+\textbf{Block} & \textbf{Learnable?} & \textbf{Differentiable?} &
+  \textbf{Arithmetic} & \textbf{Bitwise} & \textbf{Key property} \\
+\midrule
+Smooth   & No & Yes & FP transcendentals & \starmark{1} &
+  Smooth gradients \\
+Hard     & No & At points, no & Compare only & \starmark{3} &
+  Trivial compute \\
+Softmax  & No & Yes & Exp + division & \starmark{1} &
+  Probability output \\
+LUT      & Yes (training) & Via surrogate & None (memory) & \starmark{3} &
+  Universal, zero FLOPs \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+
+% ============================================================================
+% CATEGORY 4: NORMALIZATION
+% ============================================================================
+
+% ----------------------------------------------------------------------------
+\subsection{Normalisation}
+\label{sec:bb-normalisation}
+% ----------------------------------------------------------------------------
+
+Normalisation layers keep activations within a stable numerical range
+as data flows through deep networks. Without them, values tend to
+either explode or vanish, making training impossible.
+
+% --- Block 13: Layer Normalisation / RMSNorm ---
+\begin{speccard}[title={\textcolor{bitblue}{Block 13: Layer Normalisation / RMSNorm}
+  \hfill\normalfont\small\textit{Introduced in \cref{sec:residual-layernorm}}}]
+
+\textbf{One-line description.}\quad
+Rescales each token's activation vector to zero mean and unit variance
+(LayerNorm) or unit root-mean-square (RMSNorm).
+
+\smallskip
+\begin{tabular}{@{}l@{\hskip 1.2em}p{10cm}@{}}
+\textbf{Input} & Vector $\mathbf{x} \in \mathbb{R}^d$ (one token's
+  activations) \\
+\textbf{Output} & $\hat{\mathbf{x}} = \gamma \odot
+  \frac{\mathbf{x} - \mu}{\sqrt{\sigma^2 + \epsilon}} + \beta$
+  (LayerNorm); RMSNorm omits the mean subtraction \\
+\textbf{Core operation} &
+  Compute statistics across $d$ dimensions, then scale and shift \\
+\textbf{Cost} & $O(d)$ per token (two passes: statistics, then
+  normalise) \\
+\textbf{Memory} & $2d$ learnable parameters ($\gamma$, $\beta$) \\
+\textbf{Precision} & Division and square root require moderate
+  precision; bit-shift approximations exist
+  (\cref{sec:layernorm-problem}) \\
+\textbf{Bitwise} & \starmark{2} --- I-LLM and I-ViT demonstrate
+  integer-only RMSNorm using bit-shift division \\
+\end{tabular}
+
+\smallskip
+\textbf{Strengths:}
+(1)~Essential for stable training of deep networks.
+(2)~RMSNorm is simpler and faster than full LayerNorm (no mean
+  computation).
+
+\textbf{Limitations:}
+(1)~The division and square root are non-trivial in integer-only
+  settings.
+(2)~Introduces a sequential dependency within each token's
+  activations.
+
+\textbf{Used in:} All transformers (LayerNorm or RMSNorm), Mamba
+(RMSNorm), RWKV.
+\end{speccard}
+
+% --- Block 14: Batch Normalisation ---
+\begin{speccard}[title={\textcolor{bitblue}{Block 14: Batch Normalisation}
+  \hfill\normalfont\small\textit{Introduced in \cref{sec:bnn}}}]
+
+\textbf{One-line description.}\quad
+Normalises activations using statistics computed across the training
+batch, then applies learnable scale and shift.
+
+\smallskip
+\begin{tabular}{@{}l@{\hskip 1.2em}p{10cm}@{}}
+\textbf{Input} & Activation tensor, statistics computed across
+  batch dimension \\
+\textbf{Output} & Normalised tensor with learned affine transform \\
+\textbf{Core operation} &
+  $\hat{x} = \gamma \cdot \frac{x - \mu_B}{\sqrt{\sigma_B^2 + \epsilon}}
+  + \beta$ (at inference: fused into a fixed affine transform) \\
+\textbf{Cost} & $O(d)$ per sample; at inference, folds into the
+  preceding linear layer \\
+\textbf{Memory} & $2d$ learnable parameters + running statistics \\
+\textbf{Precision} & At inference, reduces to multiply-add (can be
+  INT8) \\
+\textbf{Bitwise} & \starmark{2} --- inference-time BatchNorm is a
+  fixed affine transform that can be quantised or folded into
+  preceding weights \\
+\end{tabular}
+
+\smallskip
+\textbf{Strengths:}
+(1)~At inference, introduces zero extra computation when fused.
+(2)~Critical for training BNNs (re-centres activations after binarisation).
+
+\textbf{Limitations:}
+(1)~Depends on batch statistics during training (problematic for
+  small batches or streaming).
+(2)~Not used in modern transformers (replaced by LayerNorm/RMSNorm).
+
+\textbf{Used in:} BNNs, CNNs, ResNets.
+\end{speccard}
+
+
+% ============================================================================
+% CATEGORY 5: MEMORY & STATE
+% ============================================================================
+
+% ----------------------------------------------------------------------------
+\subsection{Memory and State}
+\label{sec:bb-memory-state}
+% ----------------------------------------------------------------------------
+
+These blocks store and retrieve information rather than computing
+new values. They are often overlooked in architectural discussions,
+but they can dominate memory usage and inference cost.
+
+% --- Block 15: Embedding Table ---
+\begin{speccard}[title={\textcolor{bitblue}{Block 15: Embedding Table}
+  \hfill\normalfont\small\textit{Introduced in \cref{sec:embeddings}}}]
+
+\textbf{One-line description.}\quad
+Maps a discrete token ID to a continuous vector by looking up a row
+in a stored matrix.
+
+\smallskip
+\begin{tabular}{@{}l@{\hskip 1.2em}p{10cm}@{}}
+\textbf{Input} & Integer token ID $\in \{0, 1, \ldots, V{-}1\}$ \\
+\textbf{Output} & Embedding vector $\mathbf{e} \in \mathbb{R}^d$ \\
+\textbf{Core operation} &
+  Indexed row lookup: $\mathbf{e} = \mathbf{E}[\text{token\_id}]$ \\
+\textbf{Cost} & $O(d)$ --- copy one row from memory (no arithmetic) \\
+\textbf{Memory} & $V \times d$ parameters (e.g., $128\text{K} \times
+  4096 = 2\text{GB}$ at FP16 for a large vocabulary) \\
+\textbf{Precision} & Can be quantised to INT8 or even INT4 with
+  minimal quality loss \\
+\textbf{Bitwise} & \starmark{3} --- pure memory access; no
+  computation required \\
+\end{tabular}
+
+\smallskip
+\textbf{Strengths:}
+(1)~Zero arithmetic cost --- the simplest possible operation.
+(2)~Embeddings capture rich semantic relationships (learned during
+  training).
+
+\textbf{Limitations:}
+(1)~Memory scales with vocabulary size; large vocabularies are
+  expensive to store.
+(2)~No parameter sharing --- each token has an independent vector.
+
+\textbf{Used in:} All language models, all classification models with
+categorical input.
+\end{speccard}
+
+% --- Block 16: KV Cache ---
+\begin{speccard}[title={\textcolor{bitblue}{Block 16: KV Cache}
+  \hfill\normalfont\small\textit{Introduced in \cref{sec:autoregressive}}}]
+
+\textbf{One-line description.}\quad
+Stored keys and values from all previously processed tokens, enabling
+autoregressive generation without recomputation.
+
+\smallskip
+\begin{tabular}{@{}l@{\hskip 1.2em}p{10cm}@{}}
+\textbf{Input} & New key $\mathbf{k}_t$ and value $\mathbf{v}_t$ at
+  each generation step \\
+\textbf{Output} & Full key/value history for attention computation \\
+\textbf{Core operation} &
+  Append $(\mathbf{k}_t, \mathbf{v}_t)$ to a growing buffer \\
+\textbf{Cost} & $O(d)$ per step to store; the attention computation
+  over the cache is $O(td)$ at step $t$ \\
+\textbf{Memory} & $2 \times n_\text{layers} \times n_\text{heads}
+  \times t \times d_\text{head}$ (grows linearly with sequence) \\
+\textbf{Precision} & Can be quantised to INT8 or INT4 (KV cache
+  quantisation) \\
+\textbf{Bitwise} & \starmark{2} --- the storage is pure memory; the
+  attention over it is the bottleneck \\
+\end{tabular}
+
+\smallskip
+\textbf{Strengths:}
+(1)~Avoids $O(t^2)$ recomputation at each generation step.
+(2)~Well-understood optimisations: paged attention, grouped-query
+  attention.
+
+\textbf{Limitations:}
+(1)~Memory grows linearly with context length (can reach tens of GB
+  for long contexts).
+(2)~Absent in SSM/RNN architectures (a key advantage of Mamba/RWKV).
+
+\textbf{Used in:} All autoregressive transformers (GPT, LLaMA, etc.).
+\end{speccard}
+
+% --- Block 17: Recurrent Hidden State ---
+\begin{speccard}[title={\textcolor{bitblue}{Block 17: Recurrent Hidden State}
+  \hfill\normalfont\small\textit{Introduced in \cref{sec:mamba}, \cref{sec:rwkv}}}]
+
+\textbf{One-line description.}\quad
+A fixed-size state vector updated at each token, compressing the
+entire history into bounded memory.
+
+\smallskip
+\begin{tabular}{@{}l@{\hskip 1.2em}p{10cm}@{}}
+\textbf{Input} & Current input $x_t$ and previous state
+  $\mathbf{h}_{t-1}$ \\
+\textbf{Output} & Updated state $\mathbf{h}_t$ and output $y_t$ \\
+\textbf{Core operation} &
+  $\mathbf{h}_t = f(\mathbf{h}_{t-1}, x_t)$ (linear or gated update) \\
+\textbf{Cost} & $O(dN)$ per token for SSM; $O(d)$ for RWKV \\
+\textbf{Memory} & Fixed: $O(dN)$ for SSM, $O(d)$ for RWKV,
+  \emph{independent of sequence length} \\
+\textbf{Precision} & State can be maintained in fixed-point; INT8
+  demonstrated \\
+\textbf{Bitwise} & \starmark{2} --- fixed-size state with simple
+  update rules maps naturally to integer arithmetic \\
+\end{tabular}
+
+\smallskip
+\textbf{Strengths:}
+(1)~Constant memory regardless of sequence length.
+(2)~Natural fit for streaming and edge deployment.
+
+\textbf{Limitations:}
+(1)~Information is lossy --- the state must compress all history into
+  a fixed budget.
+(2)~Precise recall of specific past tokens is difficult.
+
+\textbf{Used in:} Mamba (SSM state), RWKV (WKV accumulators),
+classical RNNs/LSTMs.
+\end{speccard}
+
+
+% ============================================================================
+% CATEGORY 6: COMPOSITION & ROUTING
+% ============================================================================
+
+% ----------------------------------------------------------------------------
+\subsection{Composition and Routing}
+\label{sec:bb-composition}
+% ----------------------------------------------------------------------------
+
+These blocks do not transform data in the usual sense --- they control
+\emph{how} other blocks connect and combine. They are the ``wiring''
+of the architecture, and they are critical for training deep networks.
+
+% --- Block 18: Residual Connection ---
+\begin{speccard}[title={\textcolor{bitblue}{Block 18: Residual Connection}
+  \hfill\normalfont\small\textit{Introduced in \cref{sec:residual-layernorm}}}]
+
+\textbf{One-line description.}\quad
+Adds the input of a block directly to its output, creating a
+``gradient highway'' through the network.
+
+\smallskip
+\begin{tabular}{@{}l@{\hskip 1.2em}p{10cm}@{}}
+\textbf{Input} & $\mathbf{x}$ (block input) and $f(\mathbf{x})$
+  (block output) \\
+\textbf{Output} & $\mathbf{x} + f(\mathbf{x})$ \\
+\textbf{Core operation} &
+  Element-wise addition \\
+\textbf{Cost} & $O(d)$ additions per token (negligible) \\
+\textbf{Memory} & Zero parameters \\
+\textbf{Precision} & Integer addition is exact \\
+\textbf{Bitwise} & \starmark{3} --- a single integer add instruction
+  per element \\
+\end{tabular}
+
+\smallskip
+\textbf{Strengths:}
+(1)~Enables training of networks with hundreds of layers (gradients
+  flow through the skip path).
+(2)~Zero parameters, negligible cost.
+
+\textbf{Limitations:}
+(1)~Requires matching dimensions between input and output.
+(2)~Accumulated residuals can cause value drift in very deep networks
+  (mitigated by normalisation).
+
+\textbf{Used in:} All transformers, ResNets, Mamba, RWKV --- virtually
+every modern deep network.
+\end{speccard}
+
+% --- Block 19: Gated Linear Unit ---
+\begin{speccard}[title={\textcolor{bitblue}{Block 19: Gated Linear Unit (GLU)}
+  \hfill\normalfont\small\textit{Introduced in \cref{sec:ffn}, \cref{sec:mamba}}}]
+
+\textbf{One-line description.}\quad
+Splits input into two paths: one carries information, the other
+(passed through a sigmoid) controls how much flows through.
+
+\smallskip
+\begin{tabular}{@{}l@{\hskip 1.2em}p{10cm}@{}}
+\textbf{Input} & Vector $\mathbf{x} \in \mathbb{R}^d$ (or two
+  projections of it) \\
+\textbf{Output} & $\mathbf{x}_1 \odot \sigma(\mathbf{x}_2) \in
+  \mathbb{R}^{d/2}$ (element-wise product with gate) \\
+\textbf{Core operation} &
+  Element-wise multiply: value $\times$ gate \\
+\textbf{Cost} & $O(d)$ per token (one sigmoid + one element-wise
+  multiply) \\
+\textbf{Memory} & Parameters are in the preceding linear projections,
+  not the gate itself \\
+\textbf{Precision} & The sigmoid can be approximated; the multiply
+  can be INT8 \\
+\textbf{Bitwise} & \starmark{2} --- the element-wise multiply is a
+  single integer multiply per element; the sigmoid can be a LUT \\
+\end{tabular}
+
+\smallskip
+\textbf{Strengths:}
+(1)~Selective information flow improves gradient dynamics.
+(2)~Outperforms plain ReLU activation in transformer MLPs.
+
+\textbf{Limitations:}
+(1)~Doubles the number of projection parameters (two projections
+  instead of one).
+(2)~The gating sigmoid introduces a precision-sensitive nonlinearity.
+
+\textbf{Used in:} SwiGLU (LLaMA, Mistral), Mamba (output gate), RWKV
+(channel mixing).
+\end{speccard}
+
+% --- Block 20: MoE Routing ---
+\begin{speccard}[title={\textcolor{bitblue}{Block 20: Mixture-of-Experts Routing}
+  \hfill\normalfont\small\textit{Introduced in \cref{sec:moe}}}]
+
+\textbf{One-line description.}\quad
+A small gating network selects which subset of expert sub-networks
+processes each token.
+
+\smallskip
+\begin{tabular}{@{}l@{\hskip 1.2em}p{10cm}@{}}
+\textbf{Input} & Token hidden state $\mathbf{x} \in \mathbb{R}^d$ \\
+\textbf{Output} & Weighted combination of top-$k$ expert outputs \\
+\textbf{Core operation} &
+  $\text{gate}(\mathbf{x}) = \text{top-}k\bigl(
+  \text{softmax}(\mathbf{W}_g \mathbf{x})\bigr)$;
+  route token to selected experts \\
+\textbf{Cost} & Router: $O(dE)$ for $E$ experts; total compute uses
+  only $k \ll E$ experts \\
+\textbf{Memory} & $d \times E$ router weights + all expert parameters
+  (but only $k$ experts active) \\
+\textbf{Precision} & Router softmax needs moderate precision;
+  Tsetlin Machine routing proposed as an alternative
+  (\cref{sec:combined-architecture}) \\
+\textbf{Bitwise} & \starmark{2} --- the routing decision is a small
+  classification problem amenable to integer-only or
+  Tsetlin Machine implementation \\
+\end{tabular}
+
+\smallskip
+\textbf{Strengths:}
+(1)~Scales total model capacity without proportionally increasing
+  per-token compute.
+(2)~Enables trillion-parameter models with manageable inference cost.
+
+\textbf{Limitations:}
+(1)~Load balancing across experts requires careful auxiliary losses.
+(2)~All expert parameters must be stored (memory scales with total,
+  not active, parameters).
+
+\textbf{Used in:} Mixtral, Jamba, GShard, Switch Transformer.
+\end{speccard}
+
+
+% ============================================================================
+% ARCHITECTURE COMPOSITION PATTERNS
+% ============================================================================
+
+% ----------------------------------------------------------------------------
+\subsection{Architecture Composition Patterns}
+\label{sec:composition-patterns}
+% ----------------------------------------------------------------------------
+
+The twenty building blocks above combine into recognisable
+architectures. Each architecture is a ``recipe'': a specific sequence
+of blocks, repeated and stacked. Understanding the recipe makes the
+architecture transparent---it is not a monolithic black box but a
+composition of parts we have already catalogued.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  block/.style={draw, rounded corners=2pt, minimum height=0.6cm,
+    font=\scriptsize\sffamily, inner sep=3pt, line width=0.5pt},
+  lbl/.style={font=\small\sffamily\bfseries, anchor=west},
+  arr/.style={-{Stealth[length=4pt]}, thick},
+  brace/.style={decorate, decoration={brace, amplitude=4pt, mirror}},
+  xscale=1.0
+]
+
+% ---- Traditional MLP ----
+\node[lbl] at (-3.5, 0) {MLP};
+\node[block, fill=bitgray!15] (e1) at (0, 0) {Embed};
+\node[block, fill=bitblue!15] (d1) at (2.0, 0) {Dense};
+\node[block, fill=bitorange!15] (a1) at (3.8, 0) {ReLU};
+\node[block, fill=bitblue!15] (d1b) at (5.5, 0) {Dense};
+\node[block, fill=bitorange!15] (a1b) at (7.3, 0) {ReLU};
+\node[block, fill=bitpurple!15] (s1) at (9.2, 0) {Softmax};
+\draw[arr] (e1) -- (d1); \draw[arr] (d1) -- (a1);
+\draw[arr] (a1) -- (d1b); \draw[arr] (d1b) -- (a1b);
+\draw[arr] (a1b) -- (s1);
+
+% ---- BNN ----
+\node[lbl] at (-3.5, -1.4) {BNN};
+\node[block, fill=bitgray!15] (e2) at (0, -1.4) {Embed};
+\node[block, fill=bitgreen!15] (b2) at (2.0, -1.4) {Binary};
+\node[block, fill=bitorange!15] (a2) at (3.8, -1.4) {Sign};
+\node[block, fill=bitblue!12] (bn2) at (5.5, -1.4) {BN};
+\node[block, fill=bitgreen!15] (b2b) at (7.3, -1.4) {Binary};
+\node[block, fill=bitpurple!15] (s2) at (9.2, -1.4) {Softmax};
+\draw[arr] (e2) -- (b2); \draw[arr] (b2) -- (a2);
+\draw[arr] (a2) -- (bn2); \draw[arr] (bn2) -- (b2b);
+\draw[arr] (b2b) -- (s2);
+
+% ---- Transformer (one block) ----
+\node[lbl] at (-3.5, -3.2) {Transformer};
+\node[block, fill=bitgray!15] (e3) at (-1.2, -3.2) {Embed};
+\node[block, fill=bitpurple!15] (at3) at (1.0, -3.2) {Attn};
+\node[block, fill=bitgreen!8] (r3a) at (2.5, -3.2) {\tiny +Res};
+\node[block, fill=bitblue!12] (ln3a) at (3.9, -3.2) {LN};
+\node[block, fill=bitblue!15] (ff3) at (5.5, -3.2) {MLP};
+\node[block, fill=bitgreen!8] (r3b) at (6.9, -3.2) {\tiny +Res};
+\node[block, fill=bitblue!12] (ln3b) at (8.3, -3.2) {LN};
+\node[block, fill=bitpurple!15] (h3) at (9.8, -3.2) {Head};
+\draw[arr] (e3) -- (at3); \draw[arr] (at3) -- (r3a);
+\draw[arr] (r3a) -- (ln3a); \draw[arr] (ln3a) -- (ff3);
+\draw[arr] (ff3) -- (r3b); \draw[arr] (r3b) -- (ln3b);
+\draw[arr] (ln3b) -- (h3);
+
+% ---- Mamba ----
+\node[lbl] at (-3.5, -4.8) {Mamba};
+\node[block, fill=bitgray!15] (e4) at (-1.2, -4.8) {Embed};
+\node[block, fill=bitorange!15] (c4) at (1.0, -4.8) {Conv1d};
+\node[block, fill=bitpurple!15] (ss4) at (2.8, -4.8) {SSM};
+\node[block, fill=bitorange!15] (g4) at (4.5, -4.8) {GLU};
+\node[block, fill=bitgreen!8] (r4) at (6.0, -4.8) {\tiny +Res};
+\node[block, fill=bitblue!12] (rn4) at (7.4, -4.8) {RMS};
+\node[block, fill=bitpurple!15] (h4) at (9.2, -4.8) {Head};
+\draw[arr] (e4) -- (c4); \draw[arr] (c4) -- (ss4);
+\draw[arr] (ss4) -- (g4); \draw[arr] (g4) -- (r4);
+\draw[arr] (r4) -- (rn4); \draw[arr] (rn4) -- (h4);
+
+% ---- Hybrid (Jamba) ----
+\node[lbl] at (-3.5, -6.4) {Hybrid};
+\node[block, fill=bitgray!15] (e5) at (-1.2, -6.4) {Embed};
+\node[block, fill=bitpurple!15] (ss5) at (0.8, -6.4) {SSM};
+\node[block, fill=bitpurple!15] (ss5b) at (2.5, -6.4) {SSM};
+\node[font=\scriptsize] at (3.5, -6.4) {$\cdots$};
+\node[block, fill=bitpurple!15] (at5) at (4.5, -6.4) {Attn};
+\node[block, fill=bitblue!15] (moe5) at (6.2, -6.4) {MoE};
+\node[block, fill=bitpurple!15] (ss5c) at (7.9, -6.4) {SSM};
+\node[block, fill=bitpurple!15] (h5) at (9.8, -6.4) {Head};
+\draw[arr] (e5) -- (ss5); \draw[arr] (ss5) -- (ss5b);
+\draw[arr] (at5) -- (moe5); \draw[arr] (moe5) -- (ss5c);
+\draw[arr] (ss5c) -- (h5);
+
+\end{tikzpicture}
+\caption{Architecture composition patterns. Each row shows how
+  building blocks chain together to form a known architecture.
+  Residual connections (\texttt{+Res}) and normalisation layers
+  (LN, RMS, BN) appear between the main computational blocks.}
+\label{fig:composition-patterns}
+\end{figure}
+
+\begin{engineernote}
+Notice the pattern: every architecture follows the same template.
+An \emph{embedding} converts input to vectors. A \emph{sequence mixer}
+lets positions interact. A \emph{channel mixer} (MLP/GLU/MoE)
+processes each position independently. \emph{Residual connections}
+and \emph{normalisation} stabilise the stack. An \emph{output head}
+produces the final prediction.
+The architectures differ in \emph{which} specific block fills each
+role, not in the overall structure.
+\end{engineernote}
+
+
+% ============================================================================
+% CHOOSING BLOCKS
+% ============================================================================
+
+% ----------------------------------------------------------------------------
+\subsection{Choosing Blocks for Your Architecture}
+\label{sec:choosing-blocks}
+% ----------------------------------------------------------------------------
+
+The right set of building blocks depends on the task, the deployment
+constraints, and the design priorities. This section provides guidance
+for three representative use cases.
+
+\subsubsection{For MNIST Classification}
+
+MNIST is a fixed-size, single-image classification task with no
+sequential dependencies. The architecture can be minimal:
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{Sequence mixer:} None needed (no sequence).
+  \item \textbf{Linear transform:} Binary projection
+    (\cref{sec:bnn}) is sufficient --- MNIST accuracy above 98\% is
+    achievable with fully binary weights.
+  \item \textbf{Activation:} Sign function (fully binary pipeline) or
+    LUT-compiled activation for higher accuracy.
+  \item \textbf{Normalisation:} Batch normalisation (standard for BNNs).
+  \item \textbf{Bitwise amenability:} Nearly the entire model can be
+    pure bitwise (\starmark{3}).
+\end{itemize}
+
+\subsubsection{For LLM Text Generation}
+
+Language modelling requires sequential context, large capacity, and
+autoregressive generation:
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{Sequence mixer:} Attention (maximum recall quality) or
+    WKV/SSM (constant-memory inference). Hybrid architectures
+    interleave both.
+  \item \textbf{Linear transform:} Ternary projection (BitNet b1.58)
+    for weight storage savings with near-lossless quality.
+  \item \textbf{Activation:} SwiGLU with LUT-compiled sigmoid for the
+    gate.
+  \item \textbf{Normalisation:} RMSNorm with integer bit-shift
+    approximation.
+  \item \textbf{State:} KV cache (transformers) or recurrent state
+    (SSM/RWKV).
+  \item \textbf{Routing:} MoE for scaling capacity without scaling
+    per-token compute.
+  \item \textbf{Bitwise amenability:} Mixed (\starmark{1} to
+    \starmark{2}) --- attention softmax remains the bottleneck.
+\end{itemize}
+
+\subsubsection{For Audio / Sound Synthesis}
+
+Real-time audio generation requires temporal coherence at 44.1\,kHz
+and low-latency inference:
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{Sequence mixer:} WKV or SSM recurrence
+    (constant-memory, streaming-friendly). 1D convolution for local
+    temporal structure.
+  \item \textbf{Linear transform:} Ternary or binary projection for
+    real-time throughput.
+  \item \textbf{Activation:} LUT-compiled activation (zero-cost
+    nonlinearity at inference).
+  \item \textbf{Normalisation:} RMSNorm (simpler, no batch dependency).
+  \item \textbf{State:} Recurrent hidden state (no growing KV cache).
+  \item \textbf{Bitwise amenability:} Potentially high (\starmark{2}
+    to \starmark{3}) --- the recurrent structure and LUT activations
+    are naturally bitwise. The challenge is maintaining 16-bit audio
+    fidelity through a binary pipeline.
+\end{itemize}
+
+\begin{keyinsight}
+The three use cases illustrate a spectrum. MNIST can go fully bitwise
+today. LLMs require a carefully chosen mix of integer and
+floating-point components. Audio synthesis sits between the two:
+the temporal structure favours bitwise-friendly recurrent blocks, but
+the output precision demands careful quantisation-aware design.
+\end{keyinsight}
+
+
+% ============================================================================
+% SUMMARY TABLE
+% ============================================================================
+
+% ----------------------------------------------------------------------------
+\subsection{Master Reference Table}
+\label{sec:master-table}
+% ----------------------------------------------------------------------------
+
+\cref{tab:master-blocks} collects all twenty building blocks with
+their key characteristics. The table is sorted by category, then by
+bitwise amenability (highest first within each category).
+
+\begin{landscape}
+\begin{table}[p]
+\centering
+\caption{Master reference: all building blocks at a glance. Bitwise
+  amenability ranges from \starmark{1} (requires floating-point) to
+  \starmark{3} (pure bitwise / memory-only).}
+\label{tab:master-blocks}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabularx}{\linewidth}{@{}r l l l c c l X@{}}
+\toprule
+\textbf{\#} & \textbf{Block} & \textbf{Category} &
+  \textbf{Core op} & \textbf{Cost} & \textbf{Bitwise} &
+  \textbf{Precision} & \textbf{Key architectures} \\
+\midrule
+% Sequence mixers
+4 & WKV Linear RNN     & Seq.\ mixer    & Exp-decay MAC  & $O(nd)$    & \starmark{2} & INT3 shown  & RWKV \\
+3 & SSM Recurrence      & Seq.\ mixer    & Linear recur.  & $O(ndN)$   & \starmark{2} & INT8 shown  & Mamba, Jamba \\
+5 & 1D Convolution      & Seq.\ mixer    & Sliding MAC    & $O(ndk)$   & \starmark{2} & INT8        & Mamba, ConvNeXt \\
+2 & Linear Attention    & Seq.\ mixer    & Kernel trick   & $O(nd^2)$  & \starmark{2} & INT8        & Linear Transformer \\
+1 & Dot-Product Attn    & Seq.\ mixer    & $QK^\top$ + softmax & $O(n^2d)$  & \starmark{1} & FP16+   & Transformer, GPT \\
+\midrule
+% Linear transforms
+8 & Binary Projection   & Lin.\ transform & XNOR + popcount & $O(d^2\!/64)$ & \starmark{3} & 1-bit   & XNOR-Net, BNN \\
+7 & Ternary Projection  & Lin.\ transform & Add/subtract    & $O(d^2)$   & \starmark{2} & 1.58-bit & BitNet b1.58 \\
+6 & Dense Projection    & Lin.\ transform & Multiply-accum. & $O(d^2)$   & \starmark{1} & FP16     & All conventional \\
+\midrule
+% Activations
+10 & Hard Activations   & Activation & Compare     & $O(1)$ & \starmark{3} & Binary   & BNN, ReLU nets \\
+12 & LUT Activation     & Activation & Table lookup & $O(1)$ & \starmark{3} & INT8 in  & KAN-compiled, ULEEN \\
+9  & Smooth Activations & Activation & Transcend.  & $O(1)$ & \starmark{1} & FP16     & Transformers \\
+11 & Softmax            & Activation & Exp + div   & $O(n)$ & \starmark{1} & FP16+    & Attention, output \\
+\midrule
+% Normalisation
+14 & Batch Norm         & Normalisation & Affine (inf.) & $O(d)$ & \starmark{2} & INT8 (inf.) & BNN, CNN \\
+13 & LayerNorm/RMSNorm  & Normalisation & Stat + scale  & $O(d)$ & \starmark{2} & Bit-shift & Transformers \\
+\midrule
+% Memory \& state
+15 & Embedding Table    & Memory & Row lookup    & $O(d)$  & \starmark{3} & INT4+ & All LMs \\
+17 & Recurrent State    & Memory & State update  & $O(dN)$ & \starmark{2} & INT8  & Mamba, RWKV \\
+16 & KV Cache           & Memory & Append + read & $O(td)$ & \starmark{2} & INT4+ & Transformers \\
+\midrule
+% Composition
+18 & Residual Connection & Composition & Addition   & $O(d)$  & \starmark{3} & Exact    & All deep nets \\
+19 & GLU                 & Composition & Gate $\times$ val & $O(d)$ & \starmark{2} & INT8 & SwiGLU, Mamba \\
+20 & MoE Routing         & Composition & Top-$k$ select   & $O(dE)$ & \starmark{2} & Moderate & Mixtral, Jamba \\
+\bottomrule
+\end{tabularx}
+\end{table}
+\end{landscape}
+
+\begin{keyinsight}
+Of the twenty building blocks, eight achieve \starmark{3} (fully
+bitwise or zero-arithmetic) and nine achieve \starmark{2}
+(integer-only demonstrated). Only three blocks --- dot-product
+attention, smooth activations, and softmax --- stubbornly require
+floating-point or complex approximations. These three are concentrated
+in the transformer's attention mechanism, confirming the analysis in
+\cref{sec:scaling-llms}: the path to fully bitwise neural computation
+runs through replacing or approximating attention, not through the
+rest of the architecture.
+\end{keyinsight}

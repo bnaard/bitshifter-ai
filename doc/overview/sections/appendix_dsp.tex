@@ -1,0 +1,736 @@
+% ============================================================================
+\clearpage
+\section{Digital Signal Processing Fundamentals for Bitwise AI}
+\label{sec:appendix-dsp}
+% ============================================================================
+
+Throughout this article---particularly in \cref{sec:alt-architectures} and
+\cref{sec:scaling-llms}---we noted that state-space models and recurrent
+architectures are mathematically identical to classical digital signal
+processing (DSP) operations. This appendix provides the DSP background
+needed to see those connections clearly, and shows why these operations
+are natural candidates for bitwise implementation.
+
+No prior signal processing knowledge is assumed. We build everything from
+the simplest possible filter and work toward the exact equations used in
+Mamba, RWKV, and Tsetlin Machines.
+
+% ----------------------------------------------------------------------------
+\subsection{Why DSP Matters for This Project}
+\label{sec:dsp-why}
+% ----------------------------------------------------------------------------
+
+The core recurrence of every state-space model is:
+%
+\begin{equation}
+  h_t = \bar{A}\, h_{t-1} + \bar{B}\, x_t
+  \label{eq:ssm-recurrence-appendix}
+\end{equation}
+%
+where $h_t$ is the hidden state, $x_t$ is the current input,
+$\bar{A}$ is a decay factor, and $\bar{B}$ scales the input.
+If you have studied signal processing, you recognise this immediately:
+it is a \concept{first-order IIR filter}. If you have not, that term
+may mean nothing yet---but it will by the end of this appendix.
+
+The key observation is practical: DSP engineers have implemented
+exactly this operation in \emph{fixed-point integer arithmetic} on
+hardware as constrained as 8-bit microcontrollers, for applications
+ranging from audio equalisers to industrial control loops. They did
+not need floating-point units, GPUs, or even integer multipliers in
+many cases. The entire field of embedded DSP is, in essence, a
+decades-long existence proof that the core operations of modern
+neural architectures can run on minimal hardware.
+
+\begin{keyinsight}
+The Mamba recurrence is a first-order IIR filter.
+The RWKV exponential decay is an exponential moving average.
+These are not analogies---they are mathematical identities.
+DSP textbooks from the 1970s describe exactly how to implement
+them with integer arithmetic and bit shifts.
+\end{keyinsight}
+
+% ----------------------------------------------------------------------------
+\subsection{IIR Filters (Infinite Impulse Response)}
+\label{sec:dsp-iir}
+% ----------------------------------------------------------------------------
+
+A \concept{digital filter} takes a sequence of input samples and
+produces a sequence of output samples. Filters are classified by
+whether their output depends only on current and past inputs, or also
+on past outputs.
+
+An \concept{IIR filter} (Infinite Impulse Response) is one whose output
+feeds back into itself. The general form is:
+%
+\begin{equation}
+  y[n] = \sum_{k=0}^{M} b_k \, x[n-k]
+         \;-\; \sum_{k=1}^{N} a_k \, y[n-k]
+  \label{eq:iir-general}
+\end{equation}
+%
+The first sum processes current and past \emph{inputs} (the
+\concept{feedforward} path). The second sum uses past \emph{outputs}
+(the \concept{feedback} path). It is the feedback that makes the
+impulse response ``infinite''---a single input pulse produces output
+that, in principle, decays forever.
+
+\subsubsection{First-Order IIR: The Simplest Case}
+
+The simplest possible IIR filter uses one input sample and one past
+output:
+%
+\begin{equation}
+  y[n] = b_0 \, x[n] + a_1 \, y[n-1]
+  \label{eq:iir-first-order}
+\end{equation}
+%
+Compare this with the SSM recurrence in \cref{eq:ssm-recurrence-appendix}:
+they are identical, with $b_0 = \bar{B}$, $a_1 = \bar{A}$,
+$x[n] = x_t$, and $y[n] = h_t$.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth,
+  block/.style={draw, rounded corners=3pt, minimum height=0.8cm,
+    minimum width=1.4cm, font=\small\sffamily, inner sep=4pt},
+  sum/.style={draw, circle, minimum size=0.6cm, font=\sffamily,
+    inner sep=0pt},
+  arr/.style={-{Stealth[length=4pt]}, thick},
+]
+  % Input
+  \node[font=\sffamily] (xn) at (-2, 0) {$x[n]$};
+
+  % b0 multiply
+  \node[block, fill=bitblue!15] (b0) at (0, 0) {$\times\; b_0$};
+
+  % Sum
+  \node[sum, fill=bitgreen!15] (plus) at (2.5, 0) {$+$};
+
+  % Output
+  \node[font=\sffamily] (yn) at (5, 0) {$y[n]$};
+
+  % Delay
+  \node[block, fill=bitorange!15] (delay) at (5, -2) {$z^{-1}$};
+
+  % a1 multiply
+  \node[block, fill=bitpurple!15] (a1) at (2.5, -2) {$\times\; a_1$};
+
+  % Connections
+  \draw[arr] (xn) -- (b0);
+  \draw[arr] (b0) -- (plus);
+  \draw[arr] (plus) -- (yn);
+  \draw[arr] (yn.south) |- (delay.east);
+  \draw[arr] (delay) -- (a1);
+  \draw[arr] (a1) -- (plus);
+
+  % Labels
+  \node[font=\scriptsize\sffamily, above=2pt, bitblue] at (b0.north)
+    {input scaling};
+  \node[font=\scriptsize\sffamily, below=2pt, bitorange] at (delay.south)
+    {one-sample delay};
+  \node[font=\scriptsize\sffamily, below=2pt, bitpurple] at (a1.south)
+    {feedback (decay)};
+\end{tikzpicture}
+\caption{Block diagram of a first-order IIR filter. The delay element
+  $z^{-1}$ stores the previous output. This is exactly the structure
+  of the Mamba SSM recurrence, with $b_0 = \bar{B}$ and
+  $a_1 = \bar{A}$.}
+\label{fig:iir-block}
+\end{figure}
+
+\subsubsection{Frequency Response and Stability}
+
+Every filter has a \concept{frequency response}---a description of
+which frequencies it amplifies and which it attenuates. A first-order
+IIR with $0 < a_1 < 1$ acts as a \concept{low-pass filter}: it passes
+slow changes (low frequencies) and smooths out rapid changes (high
+frequencies). The closer $a_1$ is to~1, the more aggressively it
+smooths.
+
+In the SSM context, $\bar{A}$ plays the same role: a large $\bar{A}$
+(close to~1) means the state retains a long memory of past inputs,
+while a small $\bar{A}$ means the state responds mainly to recent
+input. Mamba makes this parameter \emph{input-dependent}, effectively
+learning which ``frequencies'' to keep at each time step.
+
+\concept{Stability} requires $|a_1| < 1$. If $|a_1| \geq 1$, the
+feedback grows without bound---the filter's output explodes to
+infinity. This is the same stability condition that SSMs must satisfy:
+the eigenvalues of $\bar{A}$ must lie within the unit circle.
+
+\begin{analogy}
+A first-order IIR filter is like a bathtub with a drain that is always
+partially open. Water flows in ($x[n]$, the input), and a fraction
+leaks out each moment ($a_1 < 1$, the decay). The water level ($y[n]$,
+the output) is a smoothed version of the inflow history. If the drain
+is fully closed ($a_1 = 1$), the tub overflows---the system is
+unstable.
+\end{analogy}
+
+% ----------------------------------------------------------------------------
+\subsection{Exponential Moving Average}
+\label{sec:dsp-ema}
+% ----------------------------------------------------------------------------
+
+The \concept{exponential moving average} (EMA) is a specific
+first-order IIR filter that appears throughout machine learning,
+often without being identified as a filter. Its equation is:
+%
+\begin{equation}
+  y[n] = \alpha \, x[n] + (1 - \alpha) \, y[n-1],
+  \quad 0 < \alpha < 1
+  \label{eq:ema}
+\end{equation}
+%
+This is \cref{eq:iir-first-order} with $b_0 = \alpha$ and
+$a_1 = (1 - \alpha)$. Because $b_0 + a_1 = 1$, the EMA preserves
+the DC gain (a constant input produces the same constant output),
+making it a natural choice for computing running averages.
+
+\subsubsection{How the Weights Decay}
+
+Expanding the recursion reveals the weighting pattern:
+%
+\begin{align}
+  y[n] &= \alpha \, x[n]
+         + \alpha(1-\alpha) \, x[n-1]
+         + \alpha(1-\alpha)^2 \, x[n-2] + \cdots
+  \label{eq:ema-expanded}
+\end{align}
+%
+Each past sample is weighted by $\alpha(1-\alpha)^k$, which decays
+exponentially with age~$k$. The parameter $\alpha$ controls how
+quickly old data is forgotten: a large $\alpha$ (close to~1) tracks
+the input closely with little smoothing; a small $\alpha$ produces
+heavy smoothing with long memory.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  width=10cm, height=5cm,
+  xlabel={Time step $k$ (samples ago)},
+  ylabel={Weight $\alpha(1-\alpha)^k$},
+  ymin=0, ymax=0.55,
+  xmin=0, xmax=15,
+  xtick={0,2,...,14},
+  legend style={at={(0.97,0.97)}, anchor=north east,
+    font=\small, draw=none, fill=white, fill opacity=0.8},
+  grid=major,
+  grid style={gray!20},
+]
+  % alpha = 0.5
+  \addplot[bitblue, thick, mark=*, mark size=2pt]
+    coordinates {
+      (0,0.5) (1,0.25) (2,0.125) (3,0.0625)
+      (4,0.03125) (5,0.015625) (6,0.0078125) (7,0.00390625)
+      (8,0.00195) (9,0.000977) (10,0.000488) (11,0.000244)
+      (12,0.000122) (13,0.0000610) (14,0.0000305)
+    };
+  \addlegendentry{$\alpha = 0.5$ (fast decay)}
+
+  % alpha = 0.2
+  \addplot[bitorange, thick, mark=square*, mark size=2pt]
+    coordinates {
+      (0,0.2) (1,0.16) (2,0.128) (3,0.1024)
+      (4,0.08192) (5,0.065536) (6,0.0524) (7,0.04194)
+      (8,0.03355) (9,0.02684) (10,0.02147) (11,0.01718)
+      (12,0.01374) (13,0.01100) (14,0.00879)
+    };
+  \addlegendentry{$\alpha = 0.2$ (slow decay)}
+
+  % alpha = 0.1
+  \addplot[bitgreen, thick, mark=triangle*, mark size=2.5pt]
+    coordinates {
+      (0,0.1) (1,0.09) (2,0.081) (3,0.0729)
+      (4,0.06561) (5,0.05905) (6,0.05314) (7,0.04783)
+      (8,0.04305) (9,0.03874) (10,0.03487) (11,0.03138)
+      (12,0.02824) (13,0.02542) (14,0.02288)
+    };
+  \addlegendentry{$\alpha = 0.1$ (very slow decay)}
+\end{axis}
+\end{tikzpicture}
+\caption{Exponential decay of sample weights in the EMA for different
+  values of $\alpha$. A large $\alpha$ concentrates weight on the most
+  recent sample; a small $\alpha$ spreads weight over a longer history.
+  The RWKV architecture learns this decay rate per channel.}
+\label{fig:ema-decay}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  width=10cm, height=5cm,
+  xlabel={Time step $n$},
+  ylabel={Value},
+  xmin=0, xmax=30,
+  legend style={at={(0.97,0.97)}, anchor=north east,
+    font=\small, draw=none, fill=white, fill opacity=0.8},
+  grid=major,
+  grid style={gray!20},
+]
+  % Raw signal (noisy sine)
+  \addplot[bitgray, thin, mark=none]
+    coordinates {
+      (0,2.1) (1,3.8) (2,1.2) (3,4.5) (4,2.9) (5,5.1) (6,3.3)
+      (7,5.8) (8,4.1) (9,6.2) (10,4.8) (11,5.5) (12,4.2) (13,5.0)
+      (14,3.8) (15,4.1) (16,3.0) (17,3.5) (18,2.2) (19,2.8)
+      (20,1.5) (21,2.1) (22,0.8) (23,1.5) (24,0.5) (25,1.2)
+      (26,0.3) (27,1.8) (28,0.9) (29,2.5) (30,1.1)
+    };
+  \addlegendentry{Raw signal $x[n]$}
+
+  % EMA output (alpha=0.3)
+  \addplot[bitblue, very thick, mark=none]
+    coordinates {
+      (0,2.1) (1,2.61) (2,2.19) (3,2.88) (4,2.89) (5,3.55)
+      (6,3.48) (7,4.17) (8,4.15) (9,4.77) (10,4.78) (11,5.00)
+      (12,4.76) (13,4.83) (14,4.52) (15,4.40) (16,3.98)
+      (17,3.84) (18,3.35) (19,3.18) (20,2.68) (21,2.50)
+      (22,1.99) (23,1.85) (24,1.44) (25,1.37) (26,1.05)
+      (27,1.27) (28,1.16) (29,1.56) (30,1.42)
+    };
+  \addlegendentry{EMA output ($\alpha = 0.3$)}
+\end{axis}
+\end{tikzpicture}
+\caption{An EMA smooths a noisy signal by weighting recent values
+  more heavily than older ones. This is the same operation performed
+  by batch normalisation's running statistics and by RWKV's
+  time-mixing mechanism.}
+\label{fig:ema-smoothing}
+\end{figure}
+
+\subsubsection{Where EMAs Appear in Neural Networks}
+
+The EMA is ubiquitous in deep learning:
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{Batch normalisation} maintains running mean and
+    variance using an EMA with a typical momentum of $\alpha = 0.1$.
+  \item \textbf{Optimiser momentum} (SGD with momentum, Adam's first
+    moment) is an EMA of the gradient.
+  \item \textbf{RWKV's time-mixing} uses a learned exponential decay
+    $e^{-w}$ as the forgetting factor, which is an EMA with
+    $\alpha = 1 - e^{-w}$.
+  \item \textbf{RetNet's multi-scale retention} uses different decay
+    rates per head---multiple EMAs running in parallel, each tuned
+    to a different time scale.
+\end{itemize}
+
+\begin{engineernote}
+If you have ever implemented a simple moving average in firmware or a
+running-statistics tracker in Python, you have already used the exact
+same recurrence that powers modern sequence models. The only
+difference is that models like Mamba learn the filter coefficients
+from data, while traditional DSP designs them by hand.
+\end{engineernote}
+
+% ----------------------------------------------------------------------------
+\subsection{Leaky Integrators}
+\label{sec:dsp-leaky}
+% ----------------------------------------------------------------------------
+
+A \concept{leaky integrator} is yet another name for the same
+first-order IIR structure, written with a different convention:
+%
+\begin{equation}
+  y[n] = (1 - \lambda) \, y[n-1] + \lambda \, x[n],
+  \quad 0 < \lambda < 1
+  \label{eq:leaky-integrator}
+\end{equation}
+%
+This is identical to the EMA in \cref{eq:ema} with $\lambda = \alpha$.
+The name ``leaky integrator'' comes from neuroscience and control
+theory, where it models systems that accumulate input but gradually
+lose their stored value.
+
+\subsubsection{The Leaky Bucket}
+
+\begin{analogy}
+Imagine a bucket with a small hole in the bottom. You pour water in
+at a rate proportional to the input signal $x[n]$. Between pours,
+water leaks out through the hole at a rate proportional to the current
+water level. The water level $y[n]$ is a smoothed, slightly delayed
+version of the inflow---it rises when input is sustained and falls
+when input stops. The hole size controls the ``memory'': a large hole
+(large $\lambda$) tracks input quickly but forgets fast; a small hole
+(small $\lambda$) responds slowly but remembers longer.
+\end{analogy}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth]
+  % Bucket
+  \draw[thick, bitblue] (0,0) -- (0,3) -- (3,3) -- (3,0);
+
+  % Water level
+  \fill[bitblue!20] (0.05,0.05) rectangle (2.95,1.8);
+  \node[font=\sffamily, bitblue] at (1.5,1.0) {$y[n]$};
+
+  % Input arrow
+  \draw[-{Stealth[length=5pt]}, very thick, bitgreen]
+    (1.5,4.2) -- (1.5,3.2);
+  \node[font=\sffamily\bfseries, bitgreen, above] at (1.5,4.2)
+    {$\lambda \cdot x[n]$};
+  \node[font=\scriptsize\sffamily, bitgreen] at (1.5,3.7) {input};
+
+  % Leak arrow
+  \draw[-{Stealth[length=5pt]}, very thick, bitorange]
+    (3.2,0.5) -- (4.5,0.5);
+  \node[font=\sffamily\bfseries, bitorange, right] at (4.5,0.5)
+    {$\lambda \cdot y[n{-}1]$};
+  \node[font=\scriptsize\sffamily, bitorange] at (5.5,0.1) {leak};
+
+  % Hole
+  \fill[white] (2.85,0.2) rectangle (3.15,0.8);
+  \draw[thick, bitorange] (3,0.2) -- (3,0.8);
+
+  % Bottom
+  \draw[thick, bitblue] (0,0) -- (3,0);
+
+  % Labels
+  \node[font=\scriptsize\sffamily, bitgray, align=center] at (1.5,-0.7)
+    {Small hole $\to$ slow leak $\to$ long memory\\
+     Large hole $\to$ fast leak $\to$ short memory};
+\end{tikzpicture}
+\caption{The leaky bucket analogy for a leaky integrator. Water (signal)
+  pours in and gradually leaks out. The water level represents the
+  accumulated state. Tsetlin Machine automata use a similar
+  accumulate-and-threshold mechanism---see \cref{sec:tsetlin}.}
+\label{fig:leaky-bucket}
+\end{figure}
+
+\subsubsection{Connection to Tsetlin Machines}
+
+The Tsetlin Machine automaton (described in \cref{sec:tsetlin})
+is structurally similar to a leaky integrator with a threshold.
+Each automaton has a state counter that increments or decrements
+based on feedback---this is the accumulation step. The counter
+is bounded (it cannot go below 1 or above $2N$), which acts as
+a clamp rather than a continuous leak. But the principle is the
+same: accumulate evidence over time, and make a binary decision
+(include or exclude a literal) based on whether the accumulated
+state crosses a threshold.
+
+\begin{keyinsight}
+The leaky integrator, the EMA, and the first-order IIR filter are
+all the same equation with different names, used by different
+communities. Recognising this unifies DSP, neuroscience, control
+theory, and modern sequence modelling under one framework.
+\end{keyinsight}
+
+% ----------------------------------------------------------------------------
+\subsection{Bitwise Implementation of DSP Operations}
+\label{sec:dsp-bitwise}
+% ----------------------------------------------------------------------------
+
+This is the section that ties DSP directly to the goals of this
+project. We show that every operation discussed above can be
+implemented without floating-point arithmetic---and in many cases,
+without any multiplication at all.
+
+\subsubsection{Fixed-Point Arithmetic}
+
+\concept{Fixed-point arithmetic} represents fractional numbers as
+integers with an implied denominator. Instead of storing $0.75$ as a
+float, we store it as $192$ with the understanding that the true value
+is $192 / 256$. The denominator is always a power of two
+(here~$2^8 = 256$), so we say the number uses \emph{Q8 format}---8
+fractional bits.
+
+\begin{engineernote}
+In Q8 format, the value $0.75$ is stored as the integer
+$\lfloor 0.75 \times 256 \rfloor = 192 = \texttt{0xC0}$.
+To multiply $x$ by this fixed-point $0.75$:
+compute $x \times 192$, then shift right by~8.
+The shift replaces the division by $256$.
+The result is an integer approximation of $0.75 \times x$.
+\end{engineernote}
+
+Multiplication of two Q8 numbers produces a Q16 result (the fractional
+bits add), so a right shift of~8 after multiplication restores the
+original format. This is one integer multiply and one shift---no
+floating-point unit required.
+
+\subsubsection{Power-of-Two Coefficients: Eliminating Multiplication}
+
+If we constrain the filter coefficient to be a power of two, the
+multiplication disappears entirely. If $\alpha = 1/2^k$, then:
+%
+\begin{equation}
+  \alpha \cdot x = \frac{x}{2^k} = x \gg k
+  \label{eq:shift-multiply}
+\end{equation}
+%
+where $\gg$ denotes a right bit shift. A bit shift executes in a
+single clock cycle and consumes negligible energy compared to even
+an integer multiplication.
+
+Common useful values:
+\begin{itemize}[leftmargin=2em]
+  \item $\alpha = 1/2 \;(k=1)$: $\alpha \cdot x = x \gg 1$
+  \item $\alpha = 1/4 \;(k=2)$: $\alpha \cdot x = x \gg 2$
+  \item $\alpha = 1/8 \;(k=3)$: $\alpha \cdot x = x \gg 3$
+  \item $\alpha = 3/4$: $(x \gg 1) + (x \gg 2)$ (two shifts + one add)
+\end{itemize}
+
+\subsubsection{The EMA with Bit Shifts Only}
+
+The EMA equation $y[n] = \alpha \, x[n] + (1-\alpha) \, y[n-1]$
+can be rearranged as:
+%
+\begin{equation}
+  y[n] = y[n-1] + \alpha \bigl(x[n] - y[n-1]\bigr)
+  \label{eq:ema-rearranged}
+\end{equation}
+%
+With $\alpha = 1/2^k$, this becomes:
+%
+\begin{equation}
+  y[n] = y[n{-}1] + \bigl(x[n] - y[n{-}1]\bigr) \gg k
+  \label{eq:ema-bitshift}
+\end{equation}
+%
+This is \emph{one subtraction, one shift, and one addition}. No
+multiplication whatsoever. This is how embedded systems engineers
+have implemented running averages on 8-bit microcontrollers since
+the 1980s.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[>=Stealth,
+  block/.style={draw, rounded corners=3pt, minimum height=0.7cm,
+    minimum width=1.6cm, font=\small\sffamily, inner sep=3pt},
+  sum/.style={draw, circle, minimum size=0.5cm, font=\sffamily,
+    inner sep=0pt},
+  arr/.style={-{Stealth[length=4pt]}, thick},
+]
+  % Input
+  \node[font=\sffamily] (xn) at (-2.5, 0) {$x[n]$};
+
+  % Subtract
+  \node[sum, fill=bitorange!15] (sub) at (-0.3, 0) {$-$};
+
+  % Shift
+  \node[block, fill=bitblue!15] (shift) at (2, 0) {$\gg k$};
+
+  % Add
+  \node[sum, fill=bitgreen!15] (add) at (4.5, 0) {$+$};
+
+  % Output
+  \node[font=\sffamily] (yn) at (7, 0) {$y[n]$};
+
+  % Delay
+  \node[block, fill=bitpurple!15] (delay) at (7, -1.8) {$z^{-1}$};
+
+  % Connections
+  \draw[arr] (xn) -- (sub);
+  \draw[arr] (sub) -- node[above, font=\scriptsize\sffamily] {$x[n]-y[n{-}1]$} (shift);
+  \draw[arr] (shift) -- (add);
+  \draw[arr] (add) -- (yn);
+  \draw[arr] (yn.south) |- (delay.east);
+  \draw[arr] (delay.west) -| (sub.south);
+  \draw[arr] (delay.west) -| (add.south);
+
+  % Annotation
+  \node[font=\scriptsize\sffamily, bitblue, above=2pt] at (shift.north)
+    {bit shift (no multiply!)};
+\end{tikzpicture}
+\caption{Bit-shift-only EMA implementation. The entire filter uses one
+  subtraction, one bit shift, and one addition---no multiplier needed.
+  This structure implements the same recurrence used by RWKV and Mamba.}
+\label{fig:ema-bitshift}
+\end{figure}
+
+\subsubsection{Cascaded First-Order Sections}
+
+Complex filters with sharp frequency responses are traditionally
+built from higher-order equations with many coefficients. An
+alternative is to \concept{cascade} multiple first-order sections in
+series: the output of one filter feeds into the input of the next.
+Each section is a simple bit-shift EMA, but the cascade achieves
+steeper roll-off.
+
+This is directly relevant to deep neural networks: stacking multiple
+SSM layers is equivalent to cascading multiple IIR filter stages.
+Each layer is a simple first-order recurrence, but the depth of the
+network gives it the expressive power of a high-order filter.
+
+\subsubsection{Quantisation Effects}
+
+Fixed-point and bit-shift implementations introduce
+\concept{quantisation noise}---rounding errors from discarding bits
+during shifts. For a Q$n$ representation, the worst-case error per
+operation is $2^{-n}/2$. Over many cascaded operations, these errors
+accumulate.
+
+Strategies for managing quantisation noise include:
+
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{Guard bits}: use a wider internal representation
+    (e.g., Q16 internally, Q8 at input/output) to keep precision
+    during intermediate computations.
+  \item \textbf{Rounding instead of truncation}: adding
+    $2^{k-1}$ before shifting right by $k$ rounds to the nearest
+    integer instead of always rounding down.
+  \item \textbf{Dithering}: adding a small random value before
+    quantisation to break up systematic rounding patterns.
+  \item \textbf{Noise shaping}: designing the filter to push
+    quantisation noise into frequency bands where it matters less.
+\end{itemize}
+
+The neural network analogue of quantisation noise management is the
+\concept{straight-through estimator} (STE) discussed in
+\cref{sec:bnn}: both address the fundamental challenge of maintaining
+gradient flow (or signal quality) through discretisation steps.
+
+\subsubsection{Worked Example: Integer-Only EMA}
+
+The following pseudocode implements a complete EMA filter using only
+integer arithmetic and bit shifts, suitable for an 8-bit
+microcontroller or a bitwise neural network inference engine.
+
+\begin{algorithm}[htbp]
+\caption{Integer-only EMA with bit shifts}
+\label{alg:ema-integer}
+\begin{algorithmic}[1]
+\State \textbf{Parameters:} shift $k$ (sets $\alpha = 1/2^k$)
+\State \textbf{State:} accumulator $y \gets 0$ \Comment{Q8 fixed-point}
+\Procedure{EmaUpdate}{$x$} \Comment{$x$ is Q8 input}
+  \State $\text{diff} \gets x - y$ \Comment{subtraction}
+  \State $\text{step} \gets \text{diff} \gg k$ \Comment{bit shift (= $\alpha \cdot \text{diff}$)}
+  \State $y \gets y + \text{step}$ \Comment{addition}
+  \State \Return $y$
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+Three operations. No floating point. No multiplication. This is the
+core recurrence of a state-space model, implemented in the simplest
+possible arithmetic.
+
+\subsubsection{Cost Comparison}
+
+\Cref{tab:dsp-cost} summarises the computational cost of the key
+operations across three implementation strategies. The energy figures
+are approximate and based on published estimates for 45\,nm CMOS
+technology.
+
+\begin{table}[htbp]
+\centering
+\caption{Cost comparison for DSP/SSM operations across implementation
+  strategies. Energy estimates are for 45\,nm CMOS at representative
+  bit widths (FP32, INT16, INT8).}
+\label{tab:dsp-cost}
+\begin{tabularx}{\textwidth}{@{}l >{\centering\arraybackslash}X
+  >{\centering\arraybackslash}X >{\centering\arraybackslash}X@{}}
+  \toprule
+  \textbf{Operation}
+    & \textbf{Floating-point}
+    & \textbf{Fixed-point (INT)}
+    & \textbf{Bit-shift only} \\
+  \midrule
+  Multiply by $\alpha$
+    & 1 FP multiply
+    & 1 INT multiply
+    & 1 shift \\
+  EMA update
+    & 2 FP mul + 1 add
+    & 2 INT mul + 1 add
+    & 1 sub + 1 shift + 1 add \\
+  Approx.\ energy per op
+    & ${\sim}100$\,pJ
+    & ${\sim}10$\,pJ
+    & ${\sim}1$\,pJ \\
+  Hardware required
+    & FPU
+    & Integer ALU
+    & Barrel shifter + adder \\
+  Precision
+    & ${\sim}7$ decimal digits
+    & Configurable (Q$n$)
+    & Power-of-two $\alpha$ only \\
+  \bottomrule
+\end{tabularx}
+\end{table}
+
+The two orders-of-magnitude reduction from floating-point to bit-shift
+operations is the fundamental motivation for this entire project. If
+the core operations of modern sequence models \emph{are} DSP
+operations, and DSP operations \emph{can} be implemented with bit
+shifts, then the path from transformer-class architectures to
+bitwise-only hardware is not a speculative leap---it is a well-trodden
+engineering path.
+
+% ----------------------------------------------------------------------------
+\subsection{Connection to Neural Network Building Blocks}
+\label{sec:dsp-nn-connection}
+% ----------------------------------------------------------------------------
+
+\Cref{tab:dsp-nn-mapping} maps DSP concepts to their neural network
+counterparts. These mappings are not analogies---they are mathematical
+identities or direct structural correspondences.
+
+\begin{table}[htbp]
+\centering
+\caption{DSP--neural network correspondence. Each row shows a DSP
+  operation and the neural network component that implements the same
+  (or structurally equivalent) mathematics.}
+\label{tab:dsp-nn-mapping}
+\begin{tabularx}{\textwidth}{@{}l >{\raggedright\arraybackslash}X
+  >{\raggedright\arraybackslash}X@{}}
+  \toprule
+  \textbf{DSP concept}
+    & \textbf{Neural network equivalent}
+    & \textbf{Relationship} \\
+  \midrule
+  First-order IIR filter
+    & SSM recurrence (Mamba)
+    & Mathematical identity \\
+  Exponential moving average
+    & Exponential decay attention (RWKV)
+    & Mathematical identity \\
+  Leaky integrator
+    & Tsetlin automaton state update
+    & Structural analogue \\
+  FIR filter (finite impulse response)
+    & Conv1d layer
+    & Mathematical identity \\
+  Delay line ($z^{-1}$)
+    & Causal masking / positional encoding
+    & Functional equivalence \\
+  Cascaded filter sections
+    & Stacked SSM layers (deep network)
+    & Structural analogue \\
+  Quantisation noise
+    & Weight/activation quantisation error
+    & Same phenomenon \\
+  Noise shaping
+    & Straight-through estimator
+    & Analogous strategy \\
+  \bottomrule
+\end{tabularx}
+\end{table}
+
+\begin{keyinsight}
+These are not analogies---they are mathematical identities. The SSM
+recurrence $h_t = \bar{A} h_{t-1} + \bar{B} x_t$ \textbf{is} a
+first-order IIR filter. The RWKV exponential decay \textbf{is} an
+exponential moving average. A Conv1d layer \textbf{is} an FIR filter.
+Recognising this means that sixty years of DSP implementation
+expertise---fixed-point arithmetic, bit-shift filters, cascaded
+sections, noise shaping---transfers directly to neural network
+hardware design.
+\end{keyinsight}
+
+This connection closes the loop between the four bitwise paradigms
+surveyed in this article and the sequence modelling architectures
+discussed in \cref{sec:alt-architectures}. The operations at the heart
+of modern sequence models are the same operations that DSP engineers
+have been implementing in integer and bitwise arithmetic for decades.
+The remaining challenge is not whether these operations \emph{can} be
+made bitwise---it is whether the full \emph{system} (training, learned
+coefficients, and all) can achieve competitive accuracy when confined
+to bitwise-only inference.
