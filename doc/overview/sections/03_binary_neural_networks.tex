@@ -101,6 +101,11 @@ matches. If $p$ is the popcount and $n$ is the total number of bits:
       (x\i) at (\i*0.65, 2) {\b};
   }
 
+  % Draw comparison arrows first so the filled bit boxes mask the shafts.
+  \foreach \i in {0,...,7} {
+    \draw[->, thin, bitgray] (\i*0.65, 1.65) -- (\i*0.65, 0.35);
+  }
+
   % Weight bits
   \node[lbl, left] at (-0.5, 1) {Weight $\bm{w}$:};
   \foreach \b [count=\i from 0] in {1,1,1,0,0,1,0,0} {
@@ -123,11 +128,6 @@ matches. If $p$ is the popcount and $n$ is the total number of bits:
     \fi
     \node[bit, fill=\fillcol]
       (r\i) at (\i*0.65, 0) {\b};
-  }
-
-  % Arrows
-  \foreach \i in {0,...,7} {
-    \draw[->, thin, bitgray] (\i*0.65, 1.65) -- (\i*0.65, 0.35);
   }
 
   % Popcount

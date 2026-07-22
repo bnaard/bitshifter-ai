@@ -22,11 +22,26 @@ Four paradigms are combined into a hybrid architecture:
 - **Overview** (`doc/overview/`): 50-page survey of all four paradigms, transformer architecture primer, and scaling analysis for LLMs. Engineer-friendly, builds intuition before math.
 - **Theory** (`doc/theory/`): 102-page detailed design document for the hybrid architecture — Boolean foundations through Rust implementation plan.
 
-Build either document:
+Build both documents, or select one:
 ```bash
-cd doc/overview && latexmk -lualatex -outdir=out overview.tex
-cd doc/theory   && latexmk -lualatex -outdir=out book.tex
+./scripts/build-documents.sh
+./scripts/build-documents.sh overview
+./scripts/build-documents.sh theory
 ```
+
+To rebuild continuously while editing, run the terminal-only tmux workflow:
+```bash
+./scripts/watch-document.sh overview
+```
+
+This opens a watcher and a live pixel preview in separate tmux panes when
+the tmux client is WezTerm. To use a portable text-only fallback, set
+`PREVIEW_PROTOCOL=symbols` before starting the preview.
+
+The preview pane accepts `n`/`p` (or arrow keys) for the next/previous page,
+`+`/`-` for zoom, and `q` to stop it. It refreshes itself after tmux redraws.
+For a manual two-pane layout, run `./scripts/build-documents.sh watch overview`
+in one pane and `./scripts/preview-document.sh overview` in the other.
 
 ## Repository Structure
 

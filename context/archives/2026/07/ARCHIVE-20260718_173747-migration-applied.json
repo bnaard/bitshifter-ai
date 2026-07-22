@@ -1,0 +1,138 @@
+{
+  "archive_id": "ARCHIVE-20260718_173747-migration-applied",
+  "archive_path": "context/archives/2026/07/ARCHIVE-20260718_173747-migration-applied.tar.gz",
+  "created_at": "2026-07-18T17:37:47+00:00",
+  "entities": [
+    {
+      "apiVersion": "processkit.projectious.work/v1",
+      "body_index": "# Migration MIG-20260718_1724-RuntimeSync-aibox-runtime\n\nManaged `.aibox-home/` runtime changes from `0.27.7` to `0.27.8`.\n\n0 changed upstream, 0 conflicts, 2 new, 0 removed (2 groups affected)\n\n## Counts\n\n- unchanged: 40\n- changed-locally-only: 0\n- changed-upstream-only: 0\n- conflict: 0\n- new-upstream: 2\n- removed-upstream: 0\n\n- removed-upstream-stale: 0\n\n## Changes by group\n\n### runtime-git\n\n**new-upstream**\n\n- `.aibox-home/.config/git/aibox-github.inc` -> `.aibox-home/.config/git/aibox-github.inc`\n\n### runtime-lazygit\n\n**new-upstream**\n\n- `.aibox-home/.config/lazygit/config.yml` -> `.aibox-home/.config/lazygit/config.yml`\n",
+      "id": "MIG-20260718_1724-RuntimeSync-aibox-runtime",
+      "kind": "Migration",
+      "labels": {},
+      "member_path": "context/migrations/applied/MIG-20260718_1724-RuntimeSync-aibox-runtime.md",
+      "metadata": {
+        "created": "2026-07-18T17:24:54+00:00",
+        "id": "MIG-20260718_1724-RuntimeSync-aibox-runtime",
+        "updated": "2026-07-18T17:36:09+00:00"
+      },
+      "original_path": "context/migrations/applied/MIG-20260718_1724-RuntimeSync-aibox-runtime.md",
+      "sha256": "299435f9196e4059781e920ac8f2e297cf7d8154381916ac59f1624a1082f55c",
+      "spec": {
+        "affected_files": [
+          {
+            "classification": "new-upstream",
+            "path": ".config/git/aibox-github.inc"
+          },
+          {
+            "classification": "new-upstream",
+            "path": ".config/lazygit/config.yml"
+          }
+        ],
+        "affected_groups": [
+          "runtime-git",
+          "runtime-lazygit"
+        ],
+        "applied_at": "2026-07-18T17:36:09+00:00",
+        "from_version": "0.27.7",
+        "generated_at": "2026-07-18T17:24:54+00:00",
+        "generated_by": "aibox apply",
+        "progress_notes": [
+          {
+            "actor": "mcp",
+            "note": "Reviewed as conflict-free and applied during requested pk-doctor remediation.",
+            "timestamp": "2026-07-18T17:36:09+00:00"
+          }
+        ],
+        "source": "aibox-runtime-home",
+        "source_url": "aibox://runtime-home",
+        "started_at": "2026-07-18T17:36:09+00:00",
+        "state": "applied",
+        "summary": "0 changed upstream, 0 conflicts, 2 new, 0 removed (2 groups affected)",
+        "to_version": "0.27.8"
+      },
+      "storage_location": "context/archives/2026/07/ARCHIVE-20260718_173747-migration-applied.tar.gz::context/migrations/applied/MIG-20260718_1724-RuntimeSync-aibox-runtime.md"
+    },
+    {
+      "apiVersion": "processkit.projectious.work/v1",
+      "body_index": "# Migration MIG-20260717T135019\n\nFrom `v0.27.1` to `v0.27.2` (source: `https://github.com/projectious-work/processkit.git`).\n\n0 changed upstream, 0 conflicts, 1 new, 0 removed, 0 stale-removed (1 groups affected)\n\n## Counts\n\n- unchanged: 707\n- changed-locally-only: 0\n- changed-upstream-only: 0\n- conflict: 0\n- new-upstream: 1\n- removed-upstream: 0\n- removed-upstream-stale: 0\n\n## Changes by group\n\n### skills/processkit\n\n**new-upstream**\n\n- `context/skills/processkit/pk-doctor/scripts/test_pk_doctor_mcp.py` \u2192 `context/skills/processkit/pk-doctor/scripts/test_pk_doctor_mcp.py`\n",
+      "id": "MIG-20260717T135019",
+      "kind": "Migration",
+      "labels": {},
+      "member_path": "context/migrations/applied/MIG-20260717T135019.md",
+      "metadata": {
+        "created": "2026-07-17T13:50:19+00:00",
+        "id": "MIG-20260717T135019",
+        "updated": "2026-07-18T17:36:09+00:00"
+      },
+      "original_path": "context/migrations/applied/MIG-20260717T135019.md",
+      "sha256": "ebadb4751eef43fc618ee34788b537cc62cc9563eb50205d55e5d708e15dd354",
+      "spec": {
+        "affected_files": [
+          {
+            "classification": "new-upstream",
+            "path": "context/skills/processkit/pk-doctor/scripts/test_pk_doctor_mcp.py"
+          }
+        ],
+        "affected_groups": [
+          "skills/processkit"
+        ],
+        "applied_at": "2026-07-18T17:36:09+00:00",
+        "from_version": "v0.27.1",
+        "generated_at": "2026-07-17T13:50:19+00:00",
+        "generated_by": "aibox apply",
+        "progress_notes": [
+          {
+            "actor": "mcp",
+            "note": "Reviewed as conflict-free and applied during requested pk-doctor remediation.",
+            "timestamp": "2026-07-18T17:36:09+00:00"
+          }
+        ],
+        "source": "processkit",
+        "source_url": "https://github.com/projectious-work/processkit.git",
+        "started_at": "2026-07-18T17:36:09+00:00",
+        "state": "applied",
+        "summary": "0 changed upstream, 0 conflicts, 1 new, 0 removed, 0 stale-removed (1 groups affected)",
+        "to_version": "v0.27.2"
+      },
+      "storage_location": "context/archives/2026/07/ARCHIVE-20260718_173747-migration-applied.tar.gz::context/migrations/applied/MIG-20260717T135019.md"
+    },
+    {
+      "apiVersion": "processkit.projectious.work/v1",
+      "body_index": "# Migration MIG-LOCK-20260717T121607\n\n`aibox.lock` schema extended in v0.25.6 to record the previously\napplied addon-tool and harness selection (DEC-20260508_1515-SilentAsh,\nBR-CLEANUP-ARCH item 1). This backfill captures the current selection\nas the baseline so the next `aibox apply` can compute a removal diff\nwhen a tool or harness is disabled.\n\nBackfilled previous_selection: 5 addon(s), 19 tool(s), 1 harness(es)\n\n## Backfilled addon selection\n\n- `audio-voice`: alsa-pulse, pulseaudio-utils, sox, sox-pulse\n- `latex`: svg-inkscape, texlive-biber, texlive-code, texlive-core, texlive-diagrams, texlive-fonts, texlive-math, texlive-recommended\n- `node`: node, pnpm\n- `preview-archive`: entr, mupdf, poppler, timg\n- `preview-enhanced`: rich\n\n## Backfilled harness selection\n\n- codex\n\n## Next action\n\nAcknowledge with the migration-management skill (`/pk-resume` will\nsurface it). No code change is required \u2014 the next `aibox apply`\nwill use this baseline automatically.\n",
+      "id": "MIG-LOCK-20260717T121607",
+      "kind": "Migration",
+      "labels": {},
+      "member_path": "context/migrations/applied/MIG-LOCK-20260717T121607.md",
+      "metadata": {
+        "created": "2026-07-17T12:16:07+00:00",
+        "id": "MIG-LOCK-20260717T121607",
+        "updated": "2026-07-18T17:36:09+00:00"
+      },
+      "original_path": "context/migrations/applied/MIG-LOCK-20260717T121607.md",
+      "sha256": "9ac69860183a92b87e745aea5dd860b1c543916d1819fefb363726a82a9ce6d7",
+      "spec": {
+        "applied_at": "2026-07-18T17:36:09+00:00",
+        "generated_at": "2026-07-17T12:16:07+00:00",
+        "generated_by": "aibox apply",
+        "kind": "schema-extension",
+        "progress_notes": [
+          {
+            "actor": "mcp",
+            "note": "Reviewed as conflict-free and applied during requested pk-doctor remediation.",
+            "timestamp": "2026-07-18T17:36:09+00:00"
+          }
+        ],
+        "source": "aibox-lock",
+        "source_url": "aibox://lock",
+        "started_at": "2026-07-18T17:36:09+00:00",
+        "state": "applied",
+        "summary": "Backfilled previous_selection: 5 addon(s), 19 tool(s), 1 harness(es)"
+      },
+      "storage_location": "context/archives/2026/07/ARCHIVE-20260718_173747-migration-applied.tar.gz::context/migrations/applied/MIG-LOCK-20260717T121607.md"
+    }
+  ],
+  "kind": "Migration",
+  "older_than_days": 0,
+  "sha256": "b29d82e1e111027faf7f8ea4f35bd901b7695d503d10df1402d2e8a00ac76b5f",
+  "state": "applied"
+}

@@ -3,6 +3,7 @@
 # =============================================================================
 tmp/
 out/
+.latex-cache/
 .root/
 .env
 
@@ -101,3 +102,29 @@ Thumbs.db
 
 .DocumentRevisions-V100
 .fseventsd
+
+# aibox generated
+.devcontainer/Dockerfile
+.devcontainer/docker-compose.yml
+.devcontainer/devcontainer.json
+.aibox-home/
+.aibox/
+.aibox-env/
+.agents/skills/
+.aibox-local.toml
+.aibox-local.env
+backup/
+context/.cache/
+context/.state/
+context/private/
+context/**/private/
+.mcp.json
+.cursor/mcp.json
+.gemini/settings.json
+.codex/config.toml
+.codex/hooks.json
+.continue/mcpServers/
+
+# Python runtime caches
+__pycache__/
+*.py[cod]
