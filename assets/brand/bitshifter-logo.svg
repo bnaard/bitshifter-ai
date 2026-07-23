@@ -1,19 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
-  <title id="title">Bitshifter AI shift loop logo proposal</title>
-  <desc id="desc">A ring of pixels with a blue shifting arrow.</desc>
-  <g fill="#071b3a">
-    <rect x="106" y="24" width="24" height="24" rx="2"/>
-    <rect x="155" y="42" width="24" height="24" rx="2"/>
-    <rect x="188" y="75" width="24" height="24" rx="2"/>
-    <rect x="202" y="124" width="24" height="24" rx="2"/>
-    <rect x="188" y="173" width="24" height="24" rx="2"/>
-    <rect x="155" y="206" width="24" height="24" rx="2"/>
-    <rect x="73" y="206" width="24" height="24" rx="2"/>
-    <rect x="40" y="173" width="24" height="24" rx="2"/>
-    <rect x="26" y="124" width="24" height="24" rx="2"/>
-    <rect x="40" y="75" width="24" height="24" rx="2"/>
-    <rect x="73" y="42" width="24" height="24" rx="2"/>
-  </g>
-  <path fill="#155eef" d="M104 91h28v36h23l-35 38-35-38h19z"/>
-  <rect x="155" y="104" width="24" height="24" rx="2" fill="#155eef"/>
+  <title id="title">Bitshifter AI angular pixel logo</title>
+  <desc id="desc">An angular pixel block with negative space suggesting a B.</desc>
+  <path fill="#071b3a" d="M70 30h76l48 48v40l-27 27 27 27v39l-48 15H70l48-48-27-27 27-27-48-48zM121 92l24 24-24 24h32l16-16V108l-16-16zm0 64l24 24-24 24h32l16-8v-16l-16-24z"/>
+  <rect x="30" y="78" width="24" height="24" fill="#155eef"/>
+  <rect x="30" y="132" width="24" height="24" fill="#071b3a"/>
+  <rect x="30" y="186" width="24" height="24" fill="#071b3a"/>
 </svg>
