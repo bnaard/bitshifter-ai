@@ -22,9 +22,12 @@ PDFs downloaded from arXiv for offline reference. Organised by arXiv ID.
 | 2410.18613 | poly2024softmax | Rethinking Attention: Polynomial Alternatives to Softmax in Transformers | 2024 |
 | 2411.04965 | wang2024bitneta48 | BitNet a4.8: 4-Bit Activations for 1-Bit LLMs | 2024 |
 | 2502.05003 | panferov2025quest | QuEST: Stable Training of LLMs with 1-Bit Weights and Activations | 2025 |
+| 2504.12285 | ma2025bitnet2b4t | BitNet b1.58 2B4T Technical Report | 2025 |
 | 2504.20966 | fuadi2025softpick | Softpick: No Attention Sink, No Massive Activations with Rectified Softmax | 2025 |
+| 2510.03250 | ruttgers2025light | Light Differentiable Logic Gate Networks | 2025 |
 | 2512.19304 | bnnfpga2025 | Binary Neural Network Implementation for Handwritten Digit Recognition on FPGA | 2025 |
 | 2601.08044 | lutkan2025 | LUT-Compiled Kolmogorov-Arnold Networks for Lightweight DoS Detection on IoT Edge Devices | 2025 |
+| 2607.09399 | mommen2026fullytrainable | Fully Trainable Deep Differentiable Logic Gate Networks and Lookup Table Networks | 2026 |
 
 ## Theory Document References (additional)
 
@@ -54,6 +57,9 @@ Papers without freely accessible PDFs (conference proceedings, books, paywalled)
 - LAB 2023 — WACV
 - PolyLUT 2023 — ICFPT
 - BNN Survey 2020 — Pattern Recognition
+- Fischer, Zhu & Alonso 2025 — Faster Ternary and Binary Neural Network
+  Inference on CPU by Reducing Popcount Overhead (ISLPED, DOI:
+  10.1109/ISLPED65674.2025.11261754; publisher download blocked)
 - Tsetlin 1961 — On Behaviour of Finite Automata
 - de Boor 1978 — A Practical Guide to Splines (book)
 - Abeyrathna 2021, Hubara 2017, Wheeldon 2020, Phoulady 2020, Zhang 2021
