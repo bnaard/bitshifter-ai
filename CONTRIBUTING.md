@@ -4,14 +4,14 @@ Short guide to the project workflow.
 
 ## Branching
 
-- `main` is protected and always buildable.
+- Treat `main` as the stable integration branch and keep it buildable.
 - Use short-lived branches with prefixes: `feat/`, `fix/`, `doc/`, `chore/`, `hotfix/`.
 
 ## Pull Requests
 
 - Open PRs against `main`. Keep them small and focused.
 - PR checklist:
-  - [ ] LaTeX documents compile without errors
+  - [ ] Changed LaTeX documents compile without errors
   - [ ] No generated artifacts (.aux, .log, .synctex.gz) included
   - [ ] Figures and tables regenerated if changed
   - [ ] All citations verified against actual papers
@@ -32,12 +32,16 @@ Examples:
 Requires TeX Live with LuaLaTeX. The DevContainer includes everything needed.
 
 ```bash
-# Overview (50-page survey)
-cd doc/overview && latexmk -lualatex -outdir=out overview.tex
+# Overview
+./scripts/build-documents.sh overview
 
-# Theory book (102-page design document)
-cd doc/theory && latexmk -lualatex -outdir=out book.tex
+# Theory book
+./scripts/build-documents.sh theory
 ```
+
+For a browser preview, run `aibox up` on the host and open
+`http://127.0.0.1:8766/`. For continuous rebuilding, use
+`./scripts/build-documents.sh watch overview` or `theory`.
 
 ## DevContainer
 

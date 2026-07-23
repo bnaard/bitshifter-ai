@@ -1,6 +1,10 @@
 # Referenced Papers
 
-PDFs downloaded from arXiv for offline reference. Organised by arXiv ID.
+Offline reference copies, organised by arXiv identifier where available.
+Each downloaded filename is the paper's arXiv ID and should be verified against
+the canonical record at `https://arxiv.org/abs/<arXiv-id>`. These files are
+provided for project research convenience only; copyright and licence terms
+remain with the respective authors and publishers.
 
 ## Overview Document References
 

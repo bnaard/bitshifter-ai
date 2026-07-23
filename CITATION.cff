@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "If you use Bitshifter AI, please cite this repository."
+title: "Bitshifter AI: Bitwise Neural Computation"
+type: software
+authors:
+  - family-names: Gerlach
+    given-names: Bernhard
+repository-code: "https://github.com/bnaard/bitshifter-ai"
+license: MIT
+date-released: 2026-07-23

@@ -1,10 +1,20 @@
-# Beyond Multiply-Accumulate: Bitwise Neural Computation
+# Bitshifter AI: Bitwise Neural Computation
 
-Research project exploring whether neural networks can be built from bitwise operations (AND, OR, XOR, table lookups) instead of floating-point multiply-accumulate — removing GPU dependency entirely.
+<p align="center">
+  <img src="assets/brand/bitshifter-logo.svg" alt="Bitshifter AI logo"
+    width="144">
+</p>
+
+Research project exploring whether neural networks can be built from bitwise
+operations (AND, OR, XOR, and table lookups) instead of floating-point
+multiply-accumulate operations.
 
 ## Project Goal
 
-Replace traditional MAC-based neural network inference with bitwise logic, demonstrated on MNIST digit recognition and evaluated for scalability to large language models.
+Develop and evaluate CPU-first building blocks that can complement or replace
+traditional MAC-based neural-network inference. The initial proof of concept
+targets MNIST digit recognition; the accompanying research assesses how far
+the approach may generalise to language models.
 
 ## Approach
 
@@ -17,31 +27,41 @@ Four paradigms are combined into a hybrid architecture:
 | **Logic Gate Networks** | Learned 2-input gates | Flexible composition layer |
 | **KAN / LUT Compilation** | Table lookups | Efficient deployment |
 
-## Documents
+## Read the Documents
 
-- **Overview** (`doc/overview/`): 50-page survey of all four paradigms, transformer architecture primer, and scaling analysis for LLMs. Engineer-friendly, builds intuition before math.
-- **Theory** (`doc/theory/`): 102-page detailed design document for the hybrid architecture — Boolean foundations through Rust implementation plan.
+- **Overview** (`doc/overview/`): survey of the four paradigms, a
+  transformer primer, and LLM-scaling analysis. It builds intuition before
+  introducing the formal details.
+- **Theory** (`doc/theory/`): detailed design document for the hybrid
+  architecture, from Boolean foundations through a Rust implementation plan.
 
-Build both documents, or select one:
+## Build and Preview
+
+The project scripts are the canonical document-build interface. Run them from
+the repository root, inside the development container:
+
 ```bash
-./scripts/build-documents.sh
 ./scripts/build-documents.sh overview
-./scripts/build-documents.sh theory
 ```
 
-To rebuild continuously while editing, run the terminal-only tmux workflow:
+Start the host-side Aibox environment with `aibox up`, then open the browser
+companion at [http://127.0.0.1:8766/](http://127.0.0.1:8766/). The companion
+serves completed PDFs only and refreshes after a successful rebuild.
+
+For continuous rebuilding while editing:
+
+```bash
+./scripts/build-documents.sh watch overview
+```
+
+The optional terminal-preview workflow is intended for a tmux client running
+WezTerm:
+
 ```bash
 ./scripts/watch-document.sh overview
 ```
 
-This opens a watcher and a live pixel preview in separate tmux panes when
-the tmux client is WezTerm. To use a portable text-only fallback, set
-`PREVIEW_PROTOCOL=symbols` before starting the preview.
-
-The preview pane accepts `n`/`p` (or arrow keys) for the next/previous page,
-`+`/`-` for zoom, and `q` to stop it. It refreshes itself after tmux redraws.
-For a manual two-pane layout, run `./scripts/build-documents.sh watch overview`
-in one pane and `./scripts/preview-document.sh overview` in the other.
+Use `PREVIEW_PROTOCOL=symbols` for the portable text-only fallback.
 
 ## Repository Structure
 
@@ -50,7 +70,9 @@ doc/
   overview/       Overview article (LuaLaTeX)
   theory/         Theory book (LuaLaTeX)
 research/
-  papers/         Referenced arXiv papers (PDFs)
+  papers/         Offline research copies and provenance index
+assets/
+  brand/          Canonical project logo
 ```
 
 ## Implementation Stack
@@ -62,11 +84,35 @@ research/
 
 ## Current Status
 
-- Research and theory phase complete
-- Overview and theory documents written with verified citations
-- Scaling analysis for LLMs: all transformer components have demonstrated integer-only implementations; integration at scale is the open problem
-- Next: Rust implementation of the hybrid architecture
+- The repository is currently in the research and architecture-design phase.
+- The overview and theory documents define and assess candidate building
+  blocks; they are not evidence of a completed production implementation.
+- The immediate milestone is a Rust MNIST benchmark that compares packed
+  bitwise, LUT, and low-bit integer blocks against the same CPU baseline.
+- LLM-scale integration remains an open research problem.
 
-## Owner
+## Research Corpus
+
+`research/papers/` contains convenience copies of selected openly available
+papers for offline reading. The index records the citation key and source
+identifier. Paper copyrights and licence terms remain with their respective
+authors and publishers; use the canonical source when redistributing or
+verifying a version.
+
+## Citation and License
+
+Use [`CITATION.cff`](CITATION.cff) to cite this repository. The project itself
+is released under the [MIT License](LICENSE).
+
+## AI-Assisted Project Disclaimer
+
+This project, including its research synthesis and documentation, was created
+with substantial assistance from AI systems. The owner directs the research
+questions, architectural direction, and editorial decisions, but AI-generated
+material may contain errors, omissions, unsupported claims, or hallucinations.
+Do not treat the documents as a substitute for reading the cited primary
+sources, reproducing experiments, or obtaining expert review.
+
+## Maintainer
 
 Bernhard Gerlach
