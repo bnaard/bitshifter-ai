@@ -337,8 +337,9 @@ LGNs are relatively new. Published results include:
 
 \begin{table}[htbp]
 \centering
-\caption{Logic Gate Network results on MNIST~\cite{petersen2022difflogic}.
-  The paper reports two configurations; accuracy improves with more gates.}
+\caption{Logic Gate Network results on MNIST. Connection optimisation
+  substantially changes the gate-count picture, but the newest result is a
+  preprint and needs independent replication~\cite{petersen2022difflogic,mommen2026fullytrainable}.}
 \label{tab:lgn-perf}
 \begin{tabular}{@{}lrrl@{}}
   \toprule
@@ -346,21 +347,32 @@ LGNs are relatively new. Published results include:
   \midrule
   DiffLogic (small)~\cite{petersen2022difflogic} & 97.7\% & 48k  & 6 layers, 8k gates/layer \\
   DiffLogic~\cite{petersen2022difflogic}          & 98.5\% & 384k & 6 layers, 64k gates/layer \\
+  Connection-optimised LGN~\cite{mommen2026fullytrainable} & 98.92\% & 16k & 2 layers, 8k gates/layer \\
   \bottomrule
 \end{tabular}
 \end{table}
+
+Recent work changes two important limitations of the original LGN
+formulation. A reparameterisation reduces binary-input model size by
+$4\times$, accelerates the backward pass, and reports stable CIFAR-100
+accuracy~\cite{ruttgers2025light}. Separately, learning the connections as
+well as the gate types reports 98.92\% MNIST accuracy with two layers of
+8{,}000 gates---almost $50\times$ fewer gates than a comparable
+fixed-connection construction~\cite{mommen2026fullytrainable}. These
+results make sparse, learned Boolean composition a stronger CPU research
+lead, but they do not yet establish transformer-scale circuits.
 
 \subsection{Strengths and Limitations}
 
 \begin{description}[leftmargin=1em]
   \item[Strengths:]
-    Pure logic at inference (maximum hardware efficiency), both
-    gate type and connectivity are learned (highly flexible),
-    maps directly to FPGA/ASIC implementation, compact models.
+    Pure logic at inference, learned gate type and connectivity, and a
+    plausible path to sparse, branch-light CPU evaluation when gate outputs
+    are stored and traversed in contiguous packed arrays.
 
   \item[Limitations:]
-    2-input restriction limits expressiveness per node (needs deep
-    networks), training is slower than standard backpropagation
-    (16-way softmax per node), relatively new with less community
-    tooling, accuracy on complex tasks still being explored.
+    2-input restriction can require deep networks; training is slower than
+    standard backpropagation (16-way softmax per node); and a gate graph
+    with irregular fan-out can lose to a small SIMD integer MLP on CPU
+    despite performing no multiplications.
 \end{description}

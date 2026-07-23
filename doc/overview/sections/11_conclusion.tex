@@ -11,9 +11,9 @@ without traditional multiply-accumulate arithmetic:
 \begin{enumerate}[leftmargin=2em]
   \item \textbf{Binary Neural Networks}~\cite{courbariaux2016bnn, rastegari2016xnornet} replace multiplication with
     XNOR and accumulation with popcount. They are the most mature
-    paradigm~\cite{bnnsurvey2020}, with proven speedups up to 58$\times$~\cite{rastegari2016xnornet}, but suffer
-    accuracy degradation on complex tasks and still require
-    floating-point batch normalisation at inference.
+    paradigm~\cite{bnnsurvey2020}, but CPU performance depends on data
+    packing and popcount overhead as well as arithmetic count
+    ~\cite{fischer2025popcount}.
 
   \item \textbf{Tsetlin Machines}~\cite{granmo2018tsetlin} replace the neuron metaphor entirely
     with propositional logic clauses learned through simple automata.
@@ -24,10 +24,10 @@ without traditional multiply-accumulate arithmetic:
     variant~\cite{granmo2019convtm}.
 
   \item \textbf{Logic Gate Networks}~\cite{petersen2022difflogic} learn both the type and
-    connectivity of logic gates end-to-end. They produce pure logic
-    circuits at inference time, mapping directly to hardware. Their
-    main limitation is the 2-input restriction per gate, requiring
-    deep networks for complex tasks.
+    connectivity of logic gates end-to-end. New connection-optimised
+    training substantially reduces reported gate counts, making them a
+    promising sparse Boolean building block rather than merely an
+    accelerator-circuit technique~\cite{mommen2026fullytrainable}.
 
   \item \textbf{KAN/LUT compilation}~\cite{liu2024kan, lutkan2025} trains with maximally expressive
     learnable functions (B-splines on every edge) and then compiles
@@ -38,15 +38,17 @@ without traditional multiply-accumulate arithmetic:
 
 \subsection{The Hybrid Hypothesis}
 
-We propose that combining Tsetlin Machines (for interpretable feature
-extraction), Logic Gate Networks (for flexible composition), and LUT
-compilation (for efficient deployment) can yield an architecture that
-achieves competitive accuracy on MNIST while:
+We propose a CPU-first search over composable building blocks: Tsetlin
+clauses for interpretable sparse features, Logic Gate Networks for learned
+Boolean composition, LUTs for small local nonlinearities, and ternary or
+low-bit integer kernels where they beat an irregular Boolean graph. A
+useful hybrid must achieve competitive accuracy on MNIST while:
 
 \begin{itemize}[leftmargin=2em]
   \item Using \emph{no} floating-point arithmetic at inference time
   \item Producing a partially interpretable model
-  \item Running entirely on CPU bitwise instructions and memory lookups
+  \item Using packed CPU operations, local LUTs, and only the low-bit
+    arithmetic that materially improves end-to-end runtime
   \item Being implementable in Rust with no external ML framework
     dependencies
 \end{itemize}
@@ -83,13 +85,15 @@ The analysis reveals a nuanced picture:
     specifying the hybrid architecture's mathematical formulation,
     layer dimensions, training algorithm, and convergence properties.
 
-  \item \textbf{Rust implementation:} Phased implementation starting
-    with the Tsetlin Machine component, then the LGN layer, then
-    LUT compilation, with integration tests at each phase.
+  \item \textbf{Rust implementation:} Implement and benchmark a small
+    menu of blocks independently: packed clause masks, SIMD-aware
+    binary/ternary dot products, contiguous LGN layers, and cache-sized
+    LUT activations. Compose only blocks that beat the same quantised
+    integer baseline on the target CPU.
 
-  \item \textbf{Benchmarking:} Systematic comparison against a
-    standard FP32 MLP on accuracy, latency, model size, and
-    estimated energy consumption.
+  \item \textbf{Benchmarking:} Systematic comparison against both an
+    FP32 MLP and a small quantised integer MLP on accuracy, latency,
+    model size, CPU cycles, cache misses, branch behaviour, and energy.
 
   \item \textbf{Analysis:} Inspection of learned Tsetlin clauses
     for interpretability, gate type distributions in the LGN layer,

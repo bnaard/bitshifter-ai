@@ -54,6 +54,14 @@ GPUs at all?''---networks that run on the bitwise logic instructions
 every CPU already has.
 \end{keyinsight}
 
+\begin{engineernote}
+This is a \emph{CPU-first} question, not a claim that a Boolean circuit
+automatically runs quickly on a CPU. A useful building block needs packed,
+SIMD-friendly data layout, predictable control flow, and local memory
+access. The relevant comparison is end-to-end latency and energy against a
+small quantised integer baseline on the same processor.
+\end{engineernote}
+
 \subsection{The Four Paradigms}
 
 Over the past decade, four distinct research directions have emerged

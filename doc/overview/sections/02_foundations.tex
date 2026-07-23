@@ -80,6 +80,14 @@ There is one more operation that matters enormously: \concept{popcount}
 (population count). Given a string of bits, popcount counts how many
 are~1. Most modern CPUs have a dedicated popcount instruction.
 
+That instruction is useful, but it is not a universal performance shortcut.
+On AVX2 systems, scalar popcount throughput and the absence of a native
+vector-popcount instruction can make it a bottleneck in bitwise matrix
+multiplication. A recent CPU study improved ternary and binary inference
+by fusing packing with quantisation and replacing popcount-heavy kernels
+with higher-throughput SIMD operations~\cite{fischer2025popcount}. Bitwise
+models therefore need kernel-level measurement, not just operation counts.
+
 \begin{figure}[htbp]
 \centering
 \begin{tikzpicture}[

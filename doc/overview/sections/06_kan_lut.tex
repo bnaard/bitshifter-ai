@@ -469,11 +469,12 @@ $n_\text{out}$ integer additions per layer.
 \begin{description}[leftmargin=1em]
   \item[Strengths:]
     Theoretically grounded (Kolmogorov-Arnold theorem~\cite{kolmogorov1957}), highest
-    accuracy among bitwise-deployable approaches, LUT compilation
-    enables zero-arithmetic inference, naturally maps to FPGA LUT
-    fabric~\cite{polylut2023} and CPU-based edge
-    deployment~\cite{lutkan2025}, graceful accuracy-memory trade-off
-    (more table entries = more accuracy).
+    accuracy among bitwise-deployable approaches, LUT compilation enables
+    table-driven inference, and CPU-based edge deployment has been
+    demonstrated~\cite{lutkan2025}. The key CPU trade-off is cache
+    residency: small, per-feature tables can be effective, while large or
+    scattered tables turn a nominally arithmetic-free layer into a
+    memory-latency problem.
 
   \item[Limitations:]
     Training is slow ($\sim$10$\times$ slower than MLP with same

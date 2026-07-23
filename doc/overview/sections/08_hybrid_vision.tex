@@ -24,8 +24,10 @@ Our hybrid design is guided by four principles:
     any continuous functions that remain: compile learned activations
     into tables so that inference is pure memory access + bitwise
     logic.
-  \item \textbf{All in Rust.} Implement both training and inference
-    in Rust for speed, safety, and cross-platform deployment.
+  \item \textbf{CPU-native execution.} Keep clause masks, gate inputs,
+    and LUTs contiguous and packed; prefer branch-light SIMD kernels over
+    an irregular circuit traversal. Implement both training and inference
+    in Rust for cross-platform deployment.
 \end{enumerate}
 
 \subsection{Proposed Architecture}
@@ -158,7 +160,9 @@ floating-point baseline:
       \item Classification accuracy (test set)
       \item Inference latency (microseconds per image)
       \item Model size (bytes)
-      \item Inference energy estimate (based on operation counts)
+      \item CPU cycles, cache misses, and branch-misprediction rate
+      \item Inference energy estimate, calibrated against measured CPU
+        runtime rather than operation counts alone
     \end{itemize}
   \item \textbf{Environment:} Both models implemented in Rust, running
     on the same CPU, with no GPU acceleration for either.

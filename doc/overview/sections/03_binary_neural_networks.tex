@@ -262,7 +262,7 @@ remaining non-bitwise operation in a BNN.
 
 \begin{table}[htbp]
 \centering
-\caption{BNN performance benchmarks from the literature~\cite{courbariaux2016bnn, rastegari2016xnornet, bnnfpga2025, ma2024bitnet}. BitNet b1.58's ternary approach is analysed in detail in \cref{sec:bitnet-reality}.}
+\caption{BNN performance benchmarks from the literature~\cite{courbariaux2016bnn, rastegari2016xnornet, ma2024bitnet, ma2025bitnet2b4t}. BitNet b1.58's ternary approach is analysed in detail in \cref{sec:bitnet-reality}.}
 \label{tab:bnn-perf}
 \begin{tabular}{@{}llrr@{}}
   \toprule
@@ -270,8 +270,8 @@ remaining non-bitwise operation in a BNN.
   \midrule
   BNN~\cite{courbariaux2016bnn} & MNIST   & 98.6\%  & 7$\times$ \\
   XNOR-Net~\cite{rastegari2016xnornet} & ImageNet & 51.2\%  & 58$\times$ \\
-  BNN on FPGA~\cite{bnnfpga2025} & MNIST   & 84.0\%  & Real-time \\
   BitNet b1.58~\cite{ma2024bitnet} & LLM 3B  & Competitive & 2.7$\times$ \\
+  BitNet b1.58 2B4T~\cite{ma2025bitnet2b4t} & LLM 2B & Competitive & CPU implementation released \\
   \bottomrule
 \end{tabular}
 \end{table}
@@ -284,8 +284,9 @@ drops from 76\% to 51\%~\cite{rastegari2016xnornet}). On MNIST, the accuracy los
 
 \begin{description}[leftmargin=1em]
   \item[Strengths:]
-    Extreme speed (XNOR + popcount), tiny model size (1~bit per weight),
-    well-understood theory~\cite{bnnsurvey2020}, hardware-friendly (FPGA, ASIC)~\cite{bnnfpga2025}.
+    Tiny model size (1~bit per weight), well-understood
+    theory~\cite{bnnsurvey2020}, and natural packed-data execution on
+    conventional CPUs.
 
   \item[Limitations:]
     Accuracy drops on complex tasks, the STE is a gradient approximation

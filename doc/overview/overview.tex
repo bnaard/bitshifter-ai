@@ -154,6 +154,13 @@ arithmetic. The gap between these two camps---multi-bit data
 processed with purely bitwise operations---remains an open research
 question.
 
+This is a CPU-first investigation. A lower arithmetic count is not by
+itself a speedup on a conventional processor: packing, memory locality,
+SIMD utilisation, and branch behaviour can dominate runtime. The proposed
+building blocks are therefore judged against small quantised integer
+baselines by measured end-to-end CPU performance, not by gate counts or
+accelerator mappings alone.
+
 Beyond classification, the article provides a self-contained
 introduction to transformer architectures and large language models
 (LLMs), then evaluates whether bitwise paradigms can scale to

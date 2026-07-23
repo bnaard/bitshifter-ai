@@ -26,7 +26,10 @@ LLM scale:
     address the attention mechanism, which is the defining innovation
     of transformers. BitNet b1.58~\cite{ma2024bitnet} succeeds
     precisely because it only binarises the \emph{weights}---not the
-    architecture.
+    architecture. The later 2B4T technical report provides an open,
+    natively trained 2B model and CPU inference implementation, but it
+    remains a ternary-weight rather than fully bitwise
+    transformer~\cite{ma2025bitnet2b4t}.
 
   \item[Tsetlin Machines] learn propositional clauses over Boolean
     features. Language tokens are categorical with distributional
@@ -204,16 +207,16 @@ into a logic gate network for inference:
 \begin{itemize}[leftmargin=2em]
   \item Inference-time MLP is pure combinational logic (AND/OR/XOR
     gates)---maximum hardware efficiency.
-  \item Maps directly to FPGA or ASIC implementations.
-  \item No weight memory needed at inference: the function is
-    ``burned into'' the circuit topology.
+  \item Replaces selected operations with Boolean primitives.
+  \item May reduce model storage when a sparse gate graph replaces a
+    dense projection.
 \end{itemize}
 
-\textbf{What is unproven:} LGNs have been demonstrated at MNIST scale
-(thousands of gates). A transformer MLP block at 7B scale has 67M
-parameters per layer. Whether the LGN compilation approach can scale
-to this size without prohibitive circuit depth or accuracy loss is an
-open research question.
+\textbf{What is unproven:} Recent LGNs have reached CIFAR-100 and
+connection-optimised MNIST results~\cite{ruttgers2025light,mommen2026fullytrainable},
+but not transformer MLP scale. A useful CPU implementation must also show
+that its sparse graph traversal beats a compact SIMD integer kernel; fewer
+Boolean operations alone is not enough.
 
 \subsubsection{Component 4: Tsetlin Machine Router (TM Paradigm)}
 
@@ -522,10 +525,10 @@ normalisation research.
   \textbf{Component} & \textbf{Paradigm} & \textbf{Status}
     & \textbf{Key challenge} \\
   \midrule
-  Weight storage & BitNet (BNN) & Proven (3B+) & None---ternary weights work. \\
+  Weight storage & BitNet (BNN) & Proven (2B+) & Ternary weights work; full model is not 1-bit. \\
   Matrix multiply & BitNet (BNN) & Proven & Addition/subtraction only. \\
   Activation fn. & KAN $\to$ LUT & Demonstrated & ShiftGELU~\cite{li2022ivit} or LUT compilation. \\
-  MLP compilation & LGN & Open & Circuit depth at transformer MLP scale (CIFAR-10 is current limit). \\
+  MLP compilation & LGN & Open & CPU-friendly sparse traversal at transformer MLP scale. \\
   MoE routing & Tsetlin Machine & Open & Load balancing, accuracy matching. \\
   Attention softmax & Integer approx. & Demonstrated & Shiftmax~\cite{li2022ivit}, DI-ClippedSoftmax~\cite{hu2024illm} work. Integration with ternary weights untested. \\
   Softmax-free attn. & Linear / Mamba & Demonstrated & TransNormerLLM competitive at 7B scale~\cite{qin2023transnormerllm}. \\
@@ -538,8 +541,8 @@ normalisation research.
 
 Each of the following has been independently demonstrated:
 \begin{itemize}[leftmargin=2em]
-  \item Ternary weights throughout (BitNet b1.58, proven at 3B+
-    parameters).
+  \item Ternary weights throughout (BitNet b1.58, demonstrated in an
+    open 2B model~\cite{ma2025bitnet2b4t}).
   \item Integer-only softmax via bit-shifts (I-ViT Shiftmax,
     I-LLM DI-ClippedSoftmax).
   \item Integer-only layer normalisation via bit-shifts (I-ViT,
@@ -586,8 +589,9 @@ unit would be needed at inference time.
     inference-only. Training still typically requires higher
     precision. QuEST is the exception but has not been demonstrated
     beyond moderate scale.
-  \item \textbf{LGN compilation of MLPs.} Logic Gate Networks have
-    only reached CIFAR-10 scale (61M gates). Transformer MLPs at
+  \item \textbf{LGN compilation of MLPs.} Logic Gate Networks now have
+    CIFAR-100 and connection-optimised MNIST evidence, but transformer
+    MLPs at
     7B scale have 67M parameters per layer---the numbers are
     comparable, but the computational structure differs fundamentally.
   \item \textbf{Tsetlin Machine MoE routing.} Tsetlin Machines
